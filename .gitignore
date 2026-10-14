@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+IR_results/
+Amide_results_*/
+examples/generated_synthetic/
+examples/synthetic_results/
+examples/validated_synthetic_results/
+real_spectrum_results*/
+*.zip

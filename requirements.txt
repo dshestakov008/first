@@ -1,0 +1,8 @@
+# Python 3.11+. Exact run versions are exported in Processing_Settings;
+# the full configuration is saved as processing_config.json.
+numpy>=1.24,<3
+pandas>=2.1,<3
+scipy>=1.11,<2
+matplotlib>=3.7,<4
+openpyxl>=3.1,<4
+xlrd>=2.0.1,<3
