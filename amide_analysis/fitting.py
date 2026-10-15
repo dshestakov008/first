@@ -104,36 +104,68 @@ def _fit_geometry(x, config, count):
     return separation, minimum_width, maximum_width, free_span
 
 
-def _model_admissibility(model, x, config):
-    """Physical identifiability gates; derivative seeds are never constraints."""
+def _model_constraint_details(model, x, config):
+    """Explain configured model limits without calling them physical laws."""
     params = np.asarray(model["params"], dtype=float).reshape(-1, 3)
     if not np.isfinite(params).all():
-        return ["NONFINITE_PARAMETERS"]
+        return [{"component": None, "parameter": "parameters", "value": None,
+                 "lower": None, "upper": None, "source": "finite numerical parameters",
+                 "reason": "NONFINITE_PARAMETERS"}]
     separation, minimum, maximum, _ = _fit_geometry(x, config, len(params))
-    reasons = []
-    tolerance = 1e-3 * (maximum - minimum)
-    if np.any(params[:, 2] <= minimum + tolerance):
-        reasons.append("WIDTH_LOWER_BOUND")
-    if np.any(params[:, 2] >= maximum - tolerance):
-        reasons.append("WIDTH_UPPER_BOUND")
+    details = []
+
+    def record(component, parameter, value, lower, upper, source, reason):
+        details.append({"component": component, "parameter": parameter,
+            "value": float(value), "lower": lower, "upper": upper,
+            "source": source, "reason": reason})
+
+    # Changing one end of the allowed interval must not alter the numerical
+    # tolerance at its opposite end.
+    lower_tolerance, upper_tolerance = 1e-3 * minimum, 1e-3 * maximum
+    for index in np.flatnonzero(params[:, 2] <= minimum + lower_tolerance):
+        record(int(index) + 1, "fwhm_cm1", params[index, 2], minimum, maximum,
+            "max(peaks.min_fwhm_cm1, spectral_resolution_cm1, 2 * grid_step_cm1)",
+            "WIDTH_LOWER_BOUND")
+    for index in np.flatnonzero(params[:, 2] >= maximum - upper_tolerance):
+        record(int(index) + 1, "fwhm_cm1", params[index, 2], minimum, maximum,
+            "peaks.max_fwhm_cm1 (configured numerical model limit)", "WIDTH_UPPER_BOUND")
     edge_tolerance = 1e-3 * float(x[-1] - x[0])
-    if np.any((params[:, 1] <= x[0] + edge_tolerance)
-              | (params[:, 1] >= x[-1] - edge_tolerance)):
-        reasons.append("BAND_EDGE_CENTER")
-    if np.any(np.diff(params[:, 1]) <= separation + 1e-3 * separation):
-        reasons.append("UNRESOLVED_CENTER_SEPARATION")
+    for index in np.flatnonzero((params[:, 1] <= x[0] + edge_tolerance)
+                               | (params[:, 1] >= x[-1] - edge_tolerance)):
+        record(int(index) + 1, "center_cm1", params[index, 1], float(x[0]), float(x[-1]),
+            "amide_bounds (analyzed band)", "BAND_EDGE_CENTER")
+    for index in np.flatnonzero(np.diff(params[:, 1]) <= separation + 1e-3 * separation):
+        record(int(index) + 2, "separation_from_previous_cm1",
+            params[index + 1, 1] - params[index, 1], separation, None,
+            "max(peaks.min_separation_cm1, spectral_resolution_cm1, 2 * grid_step_cm1)",
+            "UNRESOLVED_CENTER_SEPARATION")
     areas = np.asarray([component_area(*row, *config["amide_bounds"]) for row in params])
     if not np.isfinite(areas).all() or areas.sum() <= 0 or np.any(areas <= 0):
-        reasons.append("NONPOSITIVE_COMPONENT_AREA")
-    elif np.any(100 * areas / areas.sum() < config["fitting"]["min_component_area_pct"]):
-        reasons.append("WEAK_COMPONENT")
+        for index in np.flatnonzero(~np.isfinite(areas) | (areas <= 0)):
+            record(int(index) + 1, "component_area", areas[index], 0.0, None,
+                "positive finite component integral", "NONPOSITIVE_COMPONENT_AREA")
+    else:
+        relative = 100 * areas / areas.sum()
+        area_minimum = config["fitting"]["min_component_area_pct"]
+        for index in np.flatnonzero(relative < area_minimum):
+            record(int(index) + 1, "component_area_pct", relative[index], area_minimum, 100.0,
+                "fitting.min_component_area_pct (configured identifiability gate)", "WEAK_COMPONENT")
     scale = model.get("amplitude_scale")
-    if scale is not None and np.any(params[:, 0] >= 3 * scale * (1 - 1e-3)):
-        reasons.append("AMPLITUDE_UPPER_BOUND")
+    if scale is not None:
+        for index in np.flatnonzero(params[:, 0] >= 3 * scale * (1 - 1e-3)):
+            record(int(index) + 1, "amplitude", params[index, 0], 0.0, 3 * scale,
+                "3 * affine-detrended signal scale (numerical search limit)", "AMPLITUDE_UPPER_BOUND")
     condition = float(model["condition_number"])
     if not np.isfinite(condition) or condition > config["fitting"]["max_condition_number"]:
-        reasons.append("ILL_CONDITIONED")
-    return reasons
+        record(None, "condition_number", condition, None,
+            config["fitting"]["max_condition_number"],
+            "fitting.max_condition_number (configured identifiability gate)", "ILL_CONDITIONED")
+    return details
+
+
+def _model_admissibility(model, x, config):
+    """Configured identifiability gates; derivative seeds never constrain centers."""
+    return list(dict.fromkeys(row["reason"] for row in _model_constraint_details(model, x, config)))
 
 
 def _is_admissible(model):
@@ -141,7 +173,7 @@ def _is_admissible(model):
 
 
 def _bounded_fit(x, y, centers, config, rng, starts=None, initial=None):
-    """Fit ordered centers across the band, using softmax gaps and physical bounds.
+    """Fit ordered centers across the band, using softmax gaps and configured bounds.
 
     An affine baseline correction is profiled by ordinary least squares at
     every trial, so endpoint subtraction cannot distort Gaussian tail areas.
@@ -254,7 +286,8 @@ def _bounded_fit(x, y, centers, config, rng, starts=None, initial=None):
             "aicc": float(aicc), "bic": float(likelihood + k * math.log(n)),
             "count": count, "condition_number": condition, "amplitude_scale": scale,
             "initial_centers": centers.copy(), "nfev": int(result.nfev)}
-        reasons = _model_admissibility(model, x, config)
+        model["model_constraint_details"] = _model_constraint_details(model, x, config)
+        reasons = list(dict.fromkeys(row["reason"] for row in model["model_constraint_details"]))
         model["admissibility_reasons"] = reasons
         model["admissible"] = not reasons
         model["bound_hits"] = any(code in reasons for code in (
@@ -345,6 +378,8 @@ def _bootstrap(processed, best, other_models, config, rng, progress=None):
     residual = residual - residual.mean()
     parameters, percentages, structure_samples, diagnostics = [], [], [], []
     retained_count = assessed_count = 0
+    legacy_retained_count = legacy_assessed_count = 0
+    alternative_counts = sorted({int(model["count"]) for model in other_models})
     block_length = min(config["fitting"].get("bootstrap_block_length", 3), max(1, len(residual) // 4))
     # Draw all residual blocks first so retries do not change subsequent samples.
     block_starts = rng.integers(0, len(residual),
@@ -363,7 +398,7 @@ def _bootstrap(processed, best, other_models, config, rng, progress=None):
         if model is None:
             return None, "optimizer_failed", "OPTIMIZER_FAILURE", attempts
         if not _is_admissible(model):
-            reasons = model.get("admissibility_reasons", ["PHYSICAL_BOUNDARY"])
+            reasons = model.get("admissibility_reasons", ["CONFIGURED_MODEL_LIMIT"])
             return model, "inadmissible", ",".join(reasons), attempts
         return model, "accepted", "", attempts
 
@@ -373,7 +408,8 @@ def _bootstrap(processed, best, other_models, config, rng, progress=None):
         model, status, reasons, attempts = refit(best, simulated)
         row = {"iteration": index + 1, "primary_fit_status": status,
             "primary_fit_reasons": reasons, "primary_attempts": attempts,
-            "comparison_status": "primary_unavailable", "compared_counts": "",
+            "comparison_status": ("primary_unavailable" if alternative_counts
+                                  else "not_assessed_no_alternative_count"), "compared_counts": "",
             "unavailable_counts": "", "winning_components": np.nan,
             "selected_count_retained": False}
         if status == "accepted":
@@ -396,17 +432,25 @@ def _bootstrap(processed, best, other_models, config, rng, progress=None):
                 "unavailable_counts": ",".join(str(value) for value in unavailable),
                 "comparison_failure_reasons": ";".join(comparison_reasons),
                 "comparison_attempts": comparison_attempts,
-                "comparison_status": "indeterminate" if unavailable else "complete"})
-            # Failed or physically inadmissible competitors never count as
+                "comparison_status": ("not_assessed_no_alternative_count" if not alternative_counts
+                                      else "indeterminate" if unavailable else "complete")})
+            # Failed or inadmissible competitors never count as
             # evidence for K; the comparison remains explicitly indeterminate.
             if not unavailable:
-                assessed_count += 1
-                winner = min([model] + comparisons,
-                             key=lambda value: value[config["fitting"]["criterion"]])
-                retained = winner["count"] == best["count"]
-                retained_count += int(retained)
-                row["winning_components"] = int(winner["count"])
-                row["selected_count_retained"] = retained
+                # Preserve the old unconditional rates for file compatibility,
+                # but do not present a single available K as a measured contest.
+                legacy_assessed_count += 1
+                if alternative_counts:
+                    assessed_count += 1
+                    winner = min([model] + comparisons,
+                                 key=lambda value: value[config["fitting"]["criterion"]])
+                    retained = winner["count"] == best["count"]
+                    retained_count += int(retained)
+                    legacy_retained_count += int(retained)
+                    row["winning_components"] = int(winner["count"])
+                    row["selected_count_retained"] = retained
+                else:
+                    legacy_retained_count += 1
         diagnostics.append(row)
         if progress is not None and (index == 0 or (index + 1) % 10 == 0 or index + 1 == iterations):
             progress(f"  Bootstrap: {index + 1}/{iterations}; допустимых разложений: {len(parameters)}.")
@@ -414,16 +458,21 @@ def _bootstrap(processed, best, other_models, config, rng, progress=None):
     return {"parameters": np.asarray(parameters), "percentages": np.asarray(percentages),
             "structure_samples": np.asarray(structure_samples), "success_count": count,
             "success_fraction": count / iterations if iterations else 0.0,
-            "count_support": retained_count / iterations if iterations else 0.0,
-            "count_comparison_fraction": assessed_count / iterations if iterations else 0.0,
+            "count_support": legacy_retained_count / iterations if iterations else 0.0,
+            "count_comparison_fraction": legacy_assessed_count / iterations if iterations else 0.0,
+            "compared_alternative_counts": alternative_counts,
+            "assessed_count": assessed_count, "retained_count": retained_count,
+            "conditional_count_support": retained_count / assessed_count if assessed_count else np.nan,
+            "count_comparison_status": ("not_assessed_no_alternative_count" if not alternative_counts
+                else "assessed" if assessed_count == iterations else "partial"),
             "block_length": block_length, "diagnostics": diagnostics}
 
 
 def analyze_band(processed, config, seed=None, progress=None):
     """Audit model stability separately from quantitative protocol eligibility.
 
-    Invalid models and diagnostic areas remain visible. Only physically
-    admissible models enter information-criterion comparisons or bootstrap.
+    Invalid models and diagnostic areas remain visible. Only models within
+    configured limits enter information-criterion comparisons or bootstrap.
     Unknown instrument resolution is a protocol blocker, not evidence of an
     unstable numerical fit.
     """
@@ -465,7 +514,9 @@ def analyze_band(processed, config, seed=None, progress=None):
         "percentages": {name: np.nan for name in STRUCTURES}, "sensitivity": [],
         "numerical_fit_reliable": False, "quantitative_accepted": False,
         "fit_rejection_codes": rejection_codes, "protocol_blockers": protocol_blockers,
-        "diagnostic_percentages": {name: np.nan for name in STRUCTURES}, "bootstrap_diagnostics": []}
+        "diagnostic_percentages": {name: np.nan for name in STRUCTURES},
+        "nominal_percentages": {name: np.nan for name in STRUCTURES},
+        "model_constraint_details": [], "bootstrap_diagnostics": []}
     noise = max(float(processed["noise_sd"]), np.finfo(float).eps)
     snr = float(max(np.max(y), 0) / noise)
     empty["metrics"]["snr"] = snr
@@ -477,6 +528,10 @@ def analyze_band(processed, config, seed=None, progress=None):
         report("Подбор компонентов пропущен: недостаточное отношение сигнала к шуму.")
         return empty
     report("Поиск моделей по воспроизводимым кандидатам второй производной.")
+    minimum_separation, minimum_width, maximum_width, _ = _fit_geometry(x, config, 1)
+    report(f"Настроенные пределы модели: FWHM {minimum_width:g}–{maximum_width:g} см⁻¹; "
+           f"минимальное разделение центров {minimum_separation:g} см⁻¹. "
+           f"Приборное разрешение отдельно: {config['spectral_resolution_cm1']:g} см⁻¹.")
     best, fits, candidates = _select_model(processed, config, rng)
     empty["candidates"] = candidates
     if best is None:
@@ -492,9 +547,12 @@ def analyze_band(processed, config, seed=None, progress=None):
     if valid_models:
         best = valid_models[0]
     primary_admissible = bool(valid_models) and admissible(best)
+    constraint_details = best.get("model_constraint_details")
+    if constraint_details is None:
+        constraint_details = _model_constraint_details(best, x, config)
     if not primary_admissible:
-        reject("NO_PHYSICALLY_ADMISSIBLE_MODEL",
-               "Ни одна сошедшаяся модель не прошла физические ограничения; "
+        reject("NO_MODEL_WITHIN_CONFIGURED_LIMITS",
+               "Ни одна сошедшаяся модель не прошла настроенные ограничения модели; "
                "кривые сохранены диагностически, bootstrap пропущен.")
     alternatives = [model for model in valid_models if model["count"] != best["count"]]
     best_per_count = {}
@@ -509,7 +567,22 @@ def analyze_band(processed, config, seed=None, progress=None):
         reject("CANDIDATE_LIMIT_EXCEEDED",
                "Число устойчивых кандидатов превышает предел моделей; разложение не проверено полностью.")
     if best["bound_hits"]:
-        reject("PHYSICAL_PARAMETER_BOUND", "Параметр компонента достиг физической границы ограничений.")
+        reject("MODEL_PARAMETER_AT_LIMIT", "Параметр компонента достиг настроенного предела модели.")
+    if constraint_details:
+        for detail in constraint_details:
+            component_label = (f"Компонент {detail['component']}" if detail["component"] is not None
+                               else "Модель")
+            label = {"fwhm_cm1": "FWHM, см⁻¹", "center_cm1": "центр, см⁻¹",
+                     "separation_from_previous_cm1": "расстояние до предыдущего центра, см⁻¹",
+                     "component_area_pct": "относительная площадь, %"}.get(
+                         detail["parameter"], detail["parameter"])
+            value = detail["value"]
+            formatted_value = f"{value:g}" if value is not None else "нечисловое значение"
+            bounds = (f"нижний предел {detail['lower']:g}" if detail["lower"] is not None else "")
+            if detail["upper"] is not None:
+                bounds += (", " if bounds else "") + f"верхний предел {detail['upper']:g}"
+            warnings.append(f"{component_label}: {label} = {formatted_value}; {bounds}. "
+                            f"Источник ограничения: {detail['source']}.")
     if not np.isfinite(best["condition_number"]) or best["condition_number"] > fc["max_condition_number"]:
         reject("ILL_CONDITIONED_MODEL", "Плохо обусловленная модель: параметры компонентов неоднозначны.")
     if np.isfinite(delta) and delta < fc["min_model_delta"]:
@@ -537,19 +610,31 @@ def analyze_band(processed, config, seed=None, progress=None):
                    "Менее 10 bootstrap-повторов: устойчивость количественных оценок не проверена.")
         if boot["success_fraction"] < fc["bootstrap_success_fraction"]:
             reject("LOW_BOOTSTRAP_SUCCESS", "Слишком много неудачных или недопустимых bootstrap-разложений.")
-        if boot["count_support"] < fc["bootstrap_success_fraction"]:
-            reject("BOOTSTRAP_COMPONENT_COUNT_INSTABILITY", "Число компонентов неустойчиво в bootstrap-разложениях.")
-        if boot["count_comparison_fraction"] < fc["bootstrap_success_fraction"]:
-            reject("INCOMPLETE_BOOTSTRAP_COUNT_COMPARISON",
-                   "Недостаточно успешных сравнений конкурирующих bootstrap-моделей.")
+        if best_per_count:
+            if boot["count_support"] < fc["bootstrap_success_fraction"]:
+                reject("BOOTSTRAP_COMPONENT_COUNT_INSTABILITY", "Недостаточна безусловная поддержка выбранного числа компонентов в bootstrap.")
+            if boot["count_comparison_fraction"] < fc["bootstrap_success_fraction"]:
+                reject("INCOMPLETE_BOOTSTRAP_COUNT_COMPARISON",
+                       "Недостаточно успешных сравнений конкурирующих bootstrap-моделей.")
+        else:
+            report("Сравнение числа компонентов не оценено: другой модели в настроенных пределах нет. "
+                   "Доля успешных подгонок не является проверкой числа компонентов.")
     else:
-        report("Bootstrap пропущен: физически допустимой модели нет.")
-        bootstrap_status = "Skipped: no physically admissible model"
+        report("Bootstrap пропущен: модели в настроенных пределах нет.")
+        bootstrap_status = "Skipped: no model within configured limits"
         boot = {"parameters": np.empty((0, count, 3)), "percentages": np.empty((0, count)),
                 "success_count": 0, "success_fraction": np.nan, "count_support": np.nan,
-                "count_comparison_fraction": np.nan, "block_length": np.nan, "diagnostics": []}
+                "count_comparison_fraction": np.nan, "block_length": np.nan, "diagnostics": [],
+                "compared_alternative_counts": sorted(best_per_count),
+                "assessed_count": 0, "retained_count": 0, "conditional_count_support": np.nan,
+                "count_comparison_status": "not_assessed_primary_model_outside_limits"}
+    interval_available = boot["success_count"] >= 2
+    interval_sufficient = (interval_available and fc["bootstrap_iterations"] >= 10
+                          and boot["success_fraction"] >= fc["bootstrap_success_fraction"])
+    area_intervals = np.full((count, 2), np.nan)
     if boot["success_count"] >= 2:
         intervals = np.percentile(boot["parameters"][:, :, 1], [2.5, 97.5], axis=0).T
+        area_intervals = np.percentile(boot["percentages"], [2.5, 97.5], axis=0).T
         area_sd = np.std(boot["percentages"], axis=0, ddof=1)
     # Fit every preprocessing alternative before assigning structure labels.
     # One envelope is shared by the primary result, bootstrap summaries, and
@@ -676,6 +761,15 @@ def analyze_band(processed, config, seed=None, progress=None):
             "diagnostic_area_pct": float(relative[index]), "structure": categories[index],
             "center_ci_low": float(intervals[index, 0]) if boot["success_count"] >= 2 else np.nan,
             "center_ci_high": float(intervals[index, 1]) if boot["success_count"] >= 2 else np.nan,
+            "center_interval_available": bool(boot["success_count"] >= 2),
+            "center_interval_basis": "Conditional 2.5–97.5 percentiles among accepted bootstrap refits; not unconditional coverage",
+            "center_interval_success_fraction": boot["success_fraction"],
+            "center_interval_status": ("conditional_estimate" if interval_sufficient else
+                                       "insufficient_valid_refits" if interval_available else "unavailable"),
+            "area_pct_ci_low": float(area_intervals[index, 0]),
+            "area_pct_ci_high": float(area_intervals[index, 1]),
+            "bootstrap_valid_refits": int(boot["success_count"]),
+            "bootstrap_requested_refits": int(fc["bootstrap_iterations"]),
             "assignment_interval_low": float(assignment_intervals[index, 0]),
             "assignment_interval_high": float(assignment_intervals[index, 1]),
             "assignment_basis": "Primary bootstrap CI plus all admissible same-count sensitivity centers and boundary tolerance; not a confidence interval",
@@ -692,6 +786,7 @@ def analyze_band(processed, config, seed=None, progress=None):
         "solver_starts": model.get("solver_starts", np.nan),
         "solver_total_nfev": model.get("solver_total_nfev", model.get("nfev", np.nan)),
         "admissible": admissible(model), "admissibility_reasons": model.get("admissibility_reasons", []),
+        "model_constraint_details": model.get("model_constraint_details", []),
         "eligible_for_model_selection": admissible(model) and np.isfinite(model[criterion]),
         "selected": model is best, "selected_diagnostic_fallback": model is best and not primary_admissible}
         for model in fits]
@@ -704,7 +799,9 @@ def analyze_band(processed, config, seed=None, progress=None):
         "gaussian_fit": best.get("gaussian_fit", _model(x, best["params"])),
         "numerical_fit_reliable": numeric_reliable, "quantitative_accepted": quantitative_accepted,
         "fit_rejection_codes": rejection_codes, "protocol_blockers": protocol_blockers,
-        "diagnostic_percentages": fractions, "bootstrap_diagnostics": boot.get("diagnostics", []),
+        "diagnostic_percentages": fractions, "nominal_percentages": nominal_reference,
+        "model_constraint_details": constraint_details,
+        "bootstrap_diagnostics": boot.get("diagnostics", []),
         "metrics": {"snr": snr, "components": count, "r_squared": r2, "nrmse": nrmse,
             "residual_lag1": lag1, "durbin_watson": dw, "sse": best["sse"],
             "aicc": best["aicc"], "bic": best["bic"], "delta_criterion_next_count": delta,
@@ -719,6 +816,11 @@ def analyze_band(processed, config, seed=None, progress=None):
             "numerical_fit_reliable": numeric_reliable, "quantitative_accepted": quantitative_accepted,
             "bootstrap_success_fraction": boot["success_fraction"], "bootstrap_count_support": boot["count_support"],
             "bootstrap_count_comparison_fraction": boot["count_comparison_fraction"],
+            "bootstrap_assessed_count": boot.get("assessed_count", 0),
+            "bootstrap_retained_count": boot.get("retained_count", 0),
+            "bootstrap_conditional_count_support": boot.get("conditional_count_support", np.nan),
+            "bootstrap_compared_alternative_counts": boot.get("compared_alternative_counts", sorted(best_per_count)),
+            "bootstrap_count_comparison_status": boot.get("count_comparison_status", "not_assessed_no_alternative_count" if not best_per_count else "partial"),
             "bootstrap_scope": "Conditional on detected candidates; best admissible original subset per available K; staged refits",
             "bootstrap_status": bootstrap_status,
             "evaluated_candidate_subsets": sum(model.get("search_phase", "candidate_subset") == "candidate_subset"

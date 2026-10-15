@@ -113,9 +113,9 @@ class PipelineStatusTests(unittest.TestCase):
             self.assertEqual(settings.at["software_version", "value"], __version__)
             log = "\n".join(messages)
             self.assertIn("численно устойчивых разложений: 2/2", log)
-            self.assertIn("количественному сравнению: 0/2", log)
+            self.assertIn("Проверки декомпозиции Amide I прошли: 0/2", log)
             self.assertIn(str(result["excel"].resolve()), log)
-            self.assertIn(str(result["output_dir"].resolve()), messages[0])
+            self.assertTrue(any(str(result["output_dir"].resolve()) in message for message in messages[:3]))
             self.assertIn("ограничение протокола", log)
 
     def test_genuine_instability_is_distinct_from_resolution_blocker(self):
@@ -140,7 +140,7 @@ class PipelineStatusTests(unittest.TestCase):
                                        fractions["alpha_helix"])
             # One animal in each group remains insufficient for an inferential test.
             self.assertFalse(np.isfinite(result["tables"]["Statistical_Tests"]["p_value"]).any())
-            self.assertIn("количественному сравнению: 2/2", "\n".join(messages))
+            self.assertIn("Проверки декомпозиции Amide I прошли: 2/2", "\n".join(messages))
 
     def test_unavailable_sensitivity_variant_blocks_acceptance_but_keeps_diagnostic_areas(self):
         with tempfile.TemporaryDirectory() as directory:

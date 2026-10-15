@@ -26,7 +26,7 @@ _DEFAULTS = {
     },
     "normalization": "none",
     "peaks": {
-        "min_fwhm_cm1": 6.0, "max_fwhm_cm1": 40.0,
+        "min_fwhm_cm1": 6.0, "max_fwhm_cm1": 80.0,
         "max_components": 6, "min_separation_cm1": 6.0,
         "min_derivative_support": 0.66,
         "derivative_prominence_noise_factor": 2.5,

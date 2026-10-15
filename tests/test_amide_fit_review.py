@@ -55,6 +55,11 @@ class BootstrapComparisonTests(unittest.TestCase):
         self.assertEqual(result["count_support"], .5)
         self.assertEqual(result["success_count"], 2)
         self.assertEqual(fits.call_count, 4)
+        self.assertEqual(result["count_comparison_status"], "not_assessed_no_alternative_count")
+        self.assertEqual(result["assessed_count"], 0)
+        self.assertTrue(np.isnan(result["conditional_count_support"]))
+        self.assertTrue(all(row["comparison_status"] == "not_assessed_no_alternative_count"
+                            for row in result["diagnostics"]))
 
     def test_every_available_competing_count_is_compared(self):
         second, third = self.model(2, 20), self.model(3, 30)
@@ -83,6 +88,8 @@ class BootstrapComparisonTests(unittest.TestCase):
         self.assertEqual(result["success_fraction"], .75)
         self.assertEqual(result["count_comparison_fraction"], .75)
         self.assertEqual(result["count_support"], .75)
+        self.assertEqual(result["assessed_count"], 3)
+        self.assertEqual(result["conditional_count_support"], 1.0)
         self.assertEqual(fits.call_count, 7)
 
     def test_failed_warm_start_is_retried_with_independent_initializations(self):

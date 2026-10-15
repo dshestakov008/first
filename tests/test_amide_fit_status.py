@@ -69,7 +69,7 @@ class AnalyzeStatusTests(unittest.TestCase):
         bootstrap.assert_not_called()
         self.assertFalse(fit["numerical_fit_reliable"])
         self.assertFalse(fit["quantitative_accepted"])
-        self.assertIn("NO_PHYSICALLY_ADMISSIBLE_MODEL", fit["fit_rejection_codes"])
+        self.assertIn("NO_MODEL_WITHIN_CONFIGURED_LIMITS", fit["fit_rejection_codes"])
         np.testing.assert_array_equal(fit["fit"], best["fit"])
         self.assertAlmostEqual(sum(fit["diagnostic_percentages"].values()), 100.)
         self.assertTrue(all(np.isnan(value) for value in fit["percentages"].values()))

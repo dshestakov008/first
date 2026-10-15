@@ -10,7 +10,7 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
-from openpyxl.styles import Font, PatternFill
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
 
 MAIN_SHEETS = (
@@ -160,6 +160,40 @@ def export_results(output_dir: Path, tables: dict[str, pd.DataFrame], config: di
                 for cell in worksheet[1]:
                     header = str(cell.value or "")
                     worksheet.column_dimensions[cell.column_letter].width = min(45, max(14, len(header) + 2))
+                if name == "Region_Summary":
+                    widths = (62, 18, 18, 18, 16, 16, 12)
+                    for index, width in enumerate(widths, start=1):
+                        worksheet.column_dimensions[worksheet.cell(1, index).column_letter].width = width
+                    worksheet.row_dimensions[1].height = 32
+                    for cell in worksheet[1]:
+                        cell.font = Font(name="Times New Roman", size=11, bold=True, color="222222")
+                        cell.fill = PatternFill(fill_type=None)
+                        cell.border = Border(bottom=Side(style="thin", color="666666"))
+                        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+                    for row in worksheet.iter_rows(min_row=2):
+                        for cell in row:
+                            cell.font = Font(name="Times New Roman", size=11)
+                            cell.alignment = Alignment(horizontal="left" if cell.column == 1 else "center", vertical="center", wrap_text=True)
+                            if cell.column in (3, 4):
+                                cell.number_format = "0.0000"
+                            elif cell.column in (5, 6):
+                                cell.number_format = '[<0.0001]"<0.0001";0.0000'
+                            elif cell.column == 7:
+                                cell.number_format = "0.000"
+                        worksheet.row_dimensions[row[0].row].height = 32
+                if name == "Analysis_Summary":
+                    for column, width in zip("ABCD", (34, 40, 26, 100)):
+                        worksheet.column_dimensions[column].width = width
+                    for row in worksheet.iter_rows(min_row=2):
+                        worksheet.row_dimensions[row[0].row].height = 44
+                        for cell in row:
+                            cell.alignment = Alignment(vertical="center", wrap_text=True)
+                        target = row[2]
+                        if target.value in writer.sheets:
+                            target.hyperlink = f"#'{target.value}'!A1"
+                            target.style = "Hyperlink"
+            if "Analysis_Summary" in writer.sheets:
+                writer.book.active = writer.book.sheetnames.index("Analysis_Summary")
         temporary.replace(destination)
     finally:
         if temporary.exists():

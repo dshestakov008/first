@@ -22,6 +22,7 @@ from .io import discover_inputs, read_spectrum
 from .plotting import plot_groups, plot_spectrum
 from .preprocess import preprocess_spectrum
 from .reports import export_results
+from .regions import analyze_regions
 from .statistics import aggregate_animals, perform_statistics
 
 
@@ -92,6 +93,7 @@ def run_analysis(input_dir, output_dir=None, config=None, metadata_path=None, pr
         log.append(text)
         progress(text)
 
+    say(f"FTIR-анализ: версия {__version__}")
     say(f"Папка результатов: {output_dir}")
     say(f"Итоговый Excel будет сохранён: {output_dir / 'Amide_I_Results.xlsx'}")
     say(f"Найдено спектров: {len(metadata)}; животных: {metadata['animal_id'].nunique()}; "
@@ -106,8 +108,9 @@ def run_analysis(input_dir, output_dir=None, config=None, metadata_path=None, pr
     rows = {name: [] for name in ("Raw_Spectra", "Processed_Spectra", "Second_Derivative",
         "Peak_Parameters", "Fit_Quality", "Spectrum_Results", "Derivative_Candidates",
         "Model_Comparison", "Sensitivity", "Unreliable_Spectra", "Diagnostic_Structure",
-        "Bootstrap_Diagnostics")}
+        "Bootstrap_Diagnostics", "Model_Estimates")}
     figures = []
+    regional_sources = []
     readable_spectra = calculated_fits = numerically_stable_spectra = 0
     metadata = metadata.copy()
     for number, record in enumerate(metadata.to_dict("records"), start=1):
@@ -125,6 +128,7 @@ def run_analysis(input_dir, output_dir=None, config=None, metadata_path=None, pr
             metadata.loc[metadata["spectrum_id"] == spectrum_id, "sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
             raw = read_spectrum(path)
             readable_spectra += 1
+            regional_sources.append({"spectrum_id": spectrum_id, "x": raw["x"], "y": raw["y"]})
             messages.extend(raw["warnings"])
             original = raw.get("raw_table", pd.DataFrame({"wavenumber": raw["x"], "absorbance": raw["y"]}))
             for item in original.to_dict("records"):
@@ -179,11 +183,19 @@ def run_analysis(input_dir, output_dir=None, config=None, metadata_path=None, pr
                 "normalization_factor": processed["normalization_factor"], **fit["metrics"],
                 "baseline_coefficients": json.dumps(
                     np.asarray(fit.get("baseline_coefficients", []), dtype=float).tolist()),
+                "model_constraint_details": json.dumps(fit.get("model_constraint_details", []), ensure_ascii=False),
                 "numerical_fit_reliable": numeric_reliable,
                 "quantitative_accepted": quantitative_accepted,
                 "fit_rejection_codes": json.dumps(rejection_codes, ensure_ascii=False),
                 "protocol_blockers": json.dumps(protocol_blockers, ensure_ascii=False)})
             result.update({"status": fit["status"], **fit["percentages"]})
+            rows["Model_Estimates"].append({
+                "spectrum_id": spectrum_id, "animal_id": record["animal_id"], "group": record["group"],
+                "status": fit["status"], "quantitative_accepted": quantitative_accepted,
+                "estimate_basis": "Diagnostic fitted spectral areas with nominal center assignment; these are not validated protein-structure percentages",
+                **{key: fit.get("nominal_percentages", {}).get(key, np.nan) for key in STRUCTURES},
+                "bootstrap_success_fraction": fit["metrics"].get("bootstrap_success_fraction", np.nan),
+                "fit_rejection_codes": json.dumps(rejection_codes, ensure_ascii=False)})
             rows["Diagnostic_Structure"].append({
                 "spectrum_id": spectrum_id, "animal_id": record["animal_id"], "group": record["group"],
                 "percentage_basis": "Diagnostic only — not accepted for biological inference; relative fitted spectral areas",
@@ -216,6 +228,11 @@ def run_analysis(input_dir, output_dir=None, config=None, metadata_path=None, pr
                 f"допущено к количественной статистике: {'да' if quantitative_accepted else 'нет'}.")
             if rejection_codes:
                 say("  Причины отклонения модели: " + ", ".join(rejection_codes))
+            for detail in fit.get("model_constraint_details", []):
+                value = detail.get("value")
+                if isinstance(value, (int, float)):
+                    say(f"    Компонент {detail.get('component', '—')}: {detail.get('parameter')} = {value:g}; "
+                        f"допустимый диапазон [{detail.get('lower')}, {detail.get('upper')}].")
             if protocol_blockers:
                 say("  Ограничения протокола: " + ", ".join(protocol_blockers))
         except (ValueError, OSError, RuntimeError, np.linalg.LinAlgError) as exc:
@@ -231,6 +248,11 @@ def run_analysis(input_dir, output_dir=None, config=None, metadata_path=None, pr
             "(без сохранения графиков).")
         result["warnings"] = quality["warnings"]
         if result["status"] == "Failed":
+            rows["Model_Estimates"].append({
+                "spectrum_id": spectrum_id, "animal_id": record["animal_id"], "group": record["group"],
+                "status": "Failed", "quantitative_accepted": False,
+                "estimate_basis": "No model estimate: spectrum processing failed",
+                **{key: np.nan for key in STRUCTURES}, "fit_rejection_codes": quality["fit_rejection_codes"]})
             rows["Diagnostic_Structure"].append({
                 "spectrum_id": spectrum_id, "animal_id": record["animal_id"], "group": record["group"],
                 "percentage_basis": "No diagnostic percentages — spectrum processing failed",
@@ -255,6 +277,8 @@ def run_analysis(input_dir, output_dir=None, config=None, metadata_path=None, pr
     spectrum_results = _empty_frame(rows["Spectrum_Results"], ["spectrum_id", "status", *STRUCTURES])
     animals, diagnostics = aggregate_animals(spectrum_results, metadata, config)
     descriptives, tests = perform_statistics(animals, config)
+    say("Сравнение девяти заданных спектральных областей на уровне животных.")
+    regional_tables = analyze_regions(regional_sources, metadata, config)
     tables = {"Metadata": metadata,
         "Raw_Spectra": _empty_frame(rows["Raw_Spectra"], ["spectrum_id", "source_row", "wavenumber", "absorbance"]),
         "Processed_Spectra": _empty_frame(rows["Processed_Spectra"],
@@ -278,6 +302,8 @@ def run_analysis(input_dir, output_dir=None, config=None, metadata_path=None, pr
             {"key": "fit_model", "value": "Gaussian components plus a jointly profiled linear baseline; two baseline coefficients are nuisance parameters counted in AICc/BIC"},
             {"key": "processed_spectra_units", "value": "raw, baseline and refined_baseline are in original absorbance units; corrected, smoothed, baseline_adjustment, corrected_refined, gaussian_fit, fit and residual are divided by normalization_factor"},
             {"key": "processed_spectra_reconstruction", "value": "refined_baseline = baseline + baseline_adjustment * normalization_factor; corrected_refined = corrected - baseline_adjustment; gaussian_fit = fit - baseline_adjustment; raw = refined_baseline + normalization_factor * (gaussian_fit + residual)"},
+            {"key": "regional_endpoint", "value": "Mean absorbance in each of nine predefined regions after discrete L2 normalization on the full common measured grid; independent of Amide I fit acceptance"},
+            {"key": "regional_test_family", "value": "One two-sided Mann–Whitney test per eligible region (Kruskal–Wallis for more than two groups), BH correction across the nine predefined regional hypotheses; technical repeats averaged per animal"},
         ])}
     for key in ("Spectrum_Results", "Derivative_Candidates", "Model_Comparison", "Sensitivity", "Unreliable_Spectra"):
         tables[key] = _empty_frame(rows[key], ["spectrum_id", "status"])
@@ -287,14 +313,30 @@ def run_analysis(input_dir, output_dir=None, config=None, metadata_path=None, pr
     tables["Bootstrap_Diagnostics"] = _empty_frame(rows["Bootstrap_Diagnostics"],
         ["spectrum_id", "animal_id", "group", "iteration", "status"])
     tables["Animal_Diagnostics"] = diagnostics
+    tables["Model_Estimates"] = _empty_frame(rows["Model_Estimates"],
+        ["spectrum_id", "animal_id", "group", "status", "quantitative_accepted", "estimate_basis", *STRUCTURES])
+    tables.update(regional_tables)
+    reliable = int(animals["status"].eq("Reliable fit").sum())
+    tested_regions = int(tables["Region_Statistics"]["Tested"].sum())
+    significant_regions = int((tables["Region_Statistics"]["q_value_BH_FDR"] < config["statistics"]["alpha"]).sum())
+    tables["Analysis_Summary"] = pd.DataFrame([
+        {"Раздел": "Исходные спектры", "Результат": f"Прочитано {readable_spectra} из {len(metadata)}", "Таблица": "Raw_Spectra", "Пояснение": "Успех чтения оценивается отдельно от разложения на пики."},
+        {"Раздел": "Сравнение девяти областей", "Результат": f"Проверено {tested_regions} из 9 областей", "Таблица": "Region_Summary", "Пояснение": "Медианы, p Манна–Уитни, p с поправкой BH и размер эффекта. Это показатели спектральных областей."},
+        {"Раздел": "Различия областей после BH", "Результат": f"Значимы {significant_regions} из {tested_regions} проверенных областей", "Таблица": "Region_Statistics", "Пояснение": f"Единая поправка BH по заранее заданным областям; уровень значимости {config['statistics']['alpha']:g}."},
+        {"Раздел": "Разложение Amide I", "Результат": f"Прошли проверки {reliable} из {len(animals)} животных", "Таблица": "Secondary_Structure", "Пояснение": "Только принятые модельные доли участвуют в сравнении структурных категорий."},
+        {"Раздел": "Промежуточные оценки Amide I", "Результат": "Сохранены отдельно", "Таблица": "Model_Estimates", "Пояснение": "Диагностические модельные площади; статус и неопределённость приведены рядом. Не являются подтверждённым содержанием белковых структур."},
+        {"Раздел": "Причины ограничений модели", "Результат": "Параметр, значение и предел", "Таблица": "Fit_Quality", "Пояснение": "Достижение настроенного предела не означает физическую невозможность спектра."},
+        {"Раздел": "Единица статистического анализа", "Результат": f"По разметке: {metadata['animal_id'].nunique()} животных", "Таблица": "Metadata", "Пояснение": "Повторные измерения одной мыши должны иметь одинаковый animal_id. p-значения соответствуют этой разметке; без метаданных каждый файл считается отдельным животным."},
+    ])
     say("Сохраняются Excel и CSV-таблицы, затем групповые графики.")
     excel = export_results(output_dir, tables, config)
     figures.extend(plot_groups(animals, tests, figures_dir, config))
-    reliable = int(animals["status"].eq("Reliable fit").sum())
     say(f"Прочитано спектров: {readable_spectra}/{len(metadata)}; "
         f"рассчитано разложений: {calculated_fits}/{len(metadata)}; "
         f"численно устойчивых разложений: {numerically_stable_spectra}/{len(metadata)}.")
-    say(f"Животных, допущенных к количественному сравнению: {reliable}/{len(animals)}.")
+    say(f"Сравнение спектральных областей: готово {tested_regions}/9 тестов; таблица Region_Summary.")
+    say(f"Значимых различий областей после поправки BH: {significant_regions}/{tested_regions}.")
+    say(f"Проверки декомпозиции Amide I прошли: {reliable}/{len(animals)} животных.")
     say(f"Excel сохранён: {excel}")
     say(f"Папка всех результатов: {output_dir}")
     say(f"Причины отклонения и ограничения протокола: {output_dir / 'Fit_Quality.csv'}")
