@@ -34,6 +34,7 @@ _DEFAULTS = {
     "fitting": {
         "criterion": "aicc", "multistarts": 6, "max_nfev": 1500,
         "bootstrap_iterations": 30, "bootstrap_block_length": 3,
+        "bootstrap_retry_multistarts": 3,
         "bootstrap_success_fraction": 0.8,
         "min_fit_snr": 10.0, "max_nrmse": 0.12,
         "max_residual_lag1": 0.8, "max_condition_number": 1e10,
@@ -158,7 +159,8 @@ def validate_config(config: Mapping) -> dict:
     _number(p["min_derivative_support"], "peaks.min_derivative_support", 0, 1, open_min=True)
     f = c["fitting"]
     _choice(f["criterion"], "fitting.criterion", ("aicc", "bic"))
-    for key, lower in (("multistarts", 1), ("max_nfev", 1), ("bootstrap_iterations", 2)):
+    for key, lower in (("multistarts", 1), ("max_nfev", 1), ("bootstrap_iterations", 2),
+                       ("bootstrap_retry_multistarts", 1)):
         _number(f[key], f"fitting.{key}", lower, integer=True)
     _number(f["bootstrap_block_length"], "fitting.bootstrap_block_length", 1, 50, integer=True)
     _number(f["bootstrap_success_fraction"], "fitting.bootstrap_success_fraction", 0, 1, open_min=True)

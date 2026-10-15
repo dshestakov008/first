@@ -39,6 +39,7 @@
     "max_nfev": 1500,
     "bootstrap_iterations": 30,
     "bootstrap_block_length": 3,
+    "bootstrap_retry_multistarts": 3,
     "bootstrap_success_fraction": 0.8,
     "min_fit_snr": 10.0,
     "max_nrmse": 0.12,

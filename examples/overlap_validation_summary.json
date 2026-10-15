@@ -1,0 +1,816 @@
+{
+  "notice": "SYNTHETIC VALIDATION ONLY — NOT EXPERIMENTAL OR ANIMAL DATA",
+  "sampling_step_cm1": 1.92905,
+  "software_version": "1.1.0",
+  "python_version": "3.12.14",
+  "numpy_version": "2.3.5",
+  "scipy_version": "1.17.0",
+  "all_checks_passed": true,
+  "declared_synthetic_resolution_cm1": 4.0,
+  "noise_sd": 0.000375,
+  "noise_seed": 91,
+  "fit_seed": 912,
+  "analysis_config": {
+    "dataset_label": "",
+    "amide_bounds": [
+      1600.0,
+      1700.0
+    ],
+    "spectral_resolution_cm1": 4.0,
+    "resolution_confirmed": false,
+    "irregular_step_tolerance": 0.05,
+    "baseline": {
+      "method": "linear",
+      "edge_points": 3,
+      "als_lambda": 100000.0,
+      "als_p": 0.001,
+      "als_iterations": 15
+    },
+    "smoothing": {
+      "window_cm1": 9.0,
+      "polyorder": 3,
+      "derivative_windows_cm1": [
+        9.0,
+        13.0,
+        17.0
+      ],
+      "max_window_fraction": 0.2
+    },
+    "normalization": "none",
+    "peaks": {
+      "min_fwhm_cm1": 6.0,
+      "max_fwhm_cm1": 40.0,
+      "max_components": 6,
+      "min_separation_cm1": 6.0,
+      "min_derivative_support": 0.66,
+      "derivative_prominence_noise_factor": 2.5
+    },
+    "fitting": {
+      "criterion": "aicc",
+      "multistarts": 6,
+      "max_nfev": 1500,
+      "bootstrap_iterations": 30,
+      "bootstrap_block_length": 3,
+      "bootstrap_retry_multistarts": 3,
+      "bootstrap_success_fraction": 0.8,
+      "min_fit_snr": 10.0,
+      "max_nrmse": 0.12,
+      "max_residual_lag1": 0.8,
+      "max_condition_number": 10000000000.0,
+      "min_component_area_pct": 1.0,
+      "max_percentage_sd": 8.0,
+      "max_preprocessing_delta_pct": 10.0,
+      "min_model_delta": 6.0
+    },
+    "assignment_ranges": [
+      {
+        "structure": "beta_sheet",
+        "lower": 1620.0,
+        "upper": 1640.0
+      },
+      {
+        "structure": "random_coil",
+        "lower": 1640.0,
+        "upper": 1650.0
+      },
+      {
+        "structure": "alpha_helix",
+        "lower": 1650.0,
+        "upper": 1660.0
+      },
+      {
+        "structure": "beta_turn",
+        "lower": 1660.0,
+        "upper": 1680.0
+      },
+      {
+        "structure": "beta_sheet",
+        "lower": 1680.0,
+        "upper": 1695.0
+      }
+    ],
+    "assignment_boundary_tolerance_cm1": 1.0,
+    "replicates": {
+      "max_repeat_delta_pct": 10.0
+    },
+    "statistics": {
+      "method": "mannwhitney",
+      "bootstrap_iterations": 2000,
+      "min_n_ci": 3,
+      "min_n_test": 2,
+      "alpha": 0.05,
+      "posthoc_only_if_omnibus_significant": true,
+      "include_log_ratios": true,
+      "median_ci_bootstrap": false
+    },
+    "plots": {
+      "merge_beta_turn": false,
+      "control_group": "Control",
+      "colors": {},
+      "metric_labels": {},
+      "group_labels": {},
+      "point_size": 24.0,
+      "bar_width": 0.8,
+      "font_family": "DejaVu Sans",
+      "font_size": 10,
+      "dpi": 300,
+      "figure_size": [
+        9,
+        5
+      ],
+      "significance_annotations": true
+    },
+    "seed": 20261014
+  },
+  "generating_cases": [
+    {
+      "name": "well_separated",
+      "parameters": [
+        [
+          0.07,
+          1630.0,
+          12.0
+        ],
+        [
+          0.06,
+          1655.0,
+          10.0
+        ],
+        [
+          0.03,
+          1674.0,
+          12.0
+        ]
+      ],
+      "resolution_confirmed": true,
+      "require_recovery": true
+    },
+    {
+      "name": "moderate_overlap",
+      "parameters": [
+        [
+          0.07,
+          1630.0,
+          20.0
+        ],
+        [
+          0.06,
+          1655.0,
+          18.0
+        ],
+        [
+          0.03,
+          1674.0,
+          16.0
+        ]
+      ],
+      "resolution_confirmed": true,
+      "require_recovery": true
+    },
+    {
+      "name": "single_peak_with_noise",
+      "parameters": [
+        [
+          0.08,
+          1655.0,
+          20.0
+        ]
+      ],
+      "resolution_confirmed": true,
+      "require_recovery": true
+    },
+    {
+      "name": "broad_overlap",
+      "parameters": [
+        [
+          0.06,
+          1632.0,
+          28.0
+        ],
+        [
+          0.05,
+          1654.0,
+          30.0
+        ],
+        [
+          0.025,
+          1671.0,
+          28.0
+        ],
+        [
+          0.015,
+          1683.0,
+          30.0
+        ]
+      ],
+      "resolution_confirmed": true,
+      "require_recovery": false
+    },
+    {
+      "name": "assignment_boundary",
+      "parameters": [
+        [
+          0.08,
+          1650.0,
+          20.0
+        ]
+      ],
+      "resolution_confirmed": true,
+      "require_recovery": false
+    },
+    {
+      "name": "noise_only",
+      "parameters": [],
+      "resolution_confirmed": true,
+      "require_recovery": false
+    },
+    {
+      "name": "unknown_resolution",
+      "parameters": [
+        [
+          0.07,
+          1630.0,
+          20.0
+        ],
+        [
+          0.06,
+          1655.0,
+          18.0
+        ],
+        [
+          0.03,
+          1674.0,
+          16.0
+        ]
+      ],
+      "resolution_confirmed": false,
+      "require_recovery": false
+    }
+  ],
+  "results": [
+    {
+      "case": "well_separated",
+      "notice": "SYNTHETIC VALIDATION ONLY — NOT EXPERIMENTAL OR ANIMAL DATA",
+      "validation_passed": true,
+      "validation_criterion": "Accepted fit recovers centers within 0.5 cm^-1 and areas within 2 percentage points.",
+      "status": "Reliable fit",
+      "warnings": [],
+      "fit_rejection_codes": [],
+      "protocol_blockers": [],
+      "numerical_fit_reliable": true,
+      "quantitative_accepted": true,
+      "resolution_confirmed": true,
+      "known_component_count": 3,
+      "selected_component_count": 3,
+      "known_band_area_pct": [
+        46.666668185215286,
+        33.33333448353582,
+        19.999997331248895
+      ],
+      "max_center_error_cm1": 0.02271754186790531,
+      "max_area_error_percentage_points": 0.20819083647226932,
+      "accepted_percentages_withheld": false,
+      "metrics": {
+        "snr": 50.97935775722471,
+        "components": 3,
+        "r_squared": 0.9997775492211876,
+        "nrmse": 0.00447831879011013,
+        "residual_lag1": -0.04395093346583544,
+        "durbin_watson": 2.015511588808256,
+        "sse": 5.010328253474004e-06,
+        "aicc": -831.9998598241586,
+        "bic": -817.5350359267326,
+        "delta_criterion_next_count": 347.3997180099993,
+        "condition_number": 1970.660165672052,
+        "bound_hits": false,
+        "primary_model_admissible": true,
+        "numerical_fit_reliable": true,
+        "quantitative_accepted": true,
+        "bootstrap_success_fraction": 1.0,
+        "bootstrap_count_support": 1.0,
+        "bootstrap_count_comparison_fraction": 1.0,
+        "bootstrap_scope": "Conditional on detected candidates; best admissible original subset per available K; staged refits",
+        "bootstrap_status": "Evaluated",
+        "evaluated_candidate_subsets": 7,
+        "admissible_candidate_subsets": 6,
+        "evaluated_fit_records": 10,
+        "model_search_total_nfev": 201,
+        "bootstrap_success_count": 30,
+        "bootstrap_block_length": 3,
+        "max_area_pct_sd": 0.11444830569731936,
+        "max_structure_pct_sd": 0.11444830569731936,
+        "bootstrap_structure_sd_basis": "Final CI-aware fixed categories; bootstrap component areas summed by final category"
+      },
+      "components": [
+        {
+          "component": 1,
+          "center": 1630.00010223199,
+          "amplitude": 0.06930539149866102,
+          "fwhm": 12.154305392970759,
+          "area": 0.8966632580572662,
+          "area_pct": 46.750353118141454,
+          "diagnostic_area_pct": 46.750353118141454,
+          "structure": "beta_sheet",
+          "center_ci_low": 1629.9736553408402,
+          "center_ci_high": 1630.0188490204166,
+          "area_pct_sd": 0.07311749476157706,
+          "accepted": true
+        },
+        {
+          "component": 2,
+          "center": 1655.0221604931455,
+          "amplitude": 0.05959710667215972,
+          "fwhm": 10.014859544385388,
+          "area": 0.6353342219925409,
+          "area_pct": 33.12514364706355,
+          "diagnostic_area_pct": 33.12514364706355,
+          "structure": "alpha_helix",
+          "center_ci_low": 1654.9950317470402,
+          "center_ci_high": 1655.049694413973,
+          "area_pct_sd": 0.10745405976112885,
+          "accepted": true
+        },
+        {
+          "component": 3,
+          "center": 1673.977282458132,
+          "amplitude": 0.02965592100770285,
+          "fwhm": 12.22717529001549,
+          "area": 0.3859843067215883,
+          "area_pct": 20.124503234794993,
+          "diagnostic_area_pct": 20.124503234794993,
+          "structure": "beta_turn",
+          "center_ci_low": 1673.922978556767,
+          "center_ci_high": 1674.0302191100889,
+          "area_pct_sd": 0.11444830569731936,
+          "accepted": true
+        }
+      ]
+    },
+    {
+      "case": "moderate_overlap",
+      "notice": "SYNTHETIC VALIDATION ONLY — NOT EXPERIMENTAL OR ANIMAL DATA",
+      "validation_passed": true,
+      "validation_criterion": "Accepted fit recovers centers within 0.5 cm^-1 and areas within 2 percentage points.",
+      "status": "Reliable fit",
+      "warnings": [],
+      "fit_rejection_codes": [],
+      "protocol_blockers": [],
+      "numerical_fit_reliable": true,
+      "quantitative_accepted": true,
+      "resolution_confirmed": true,
+      "known_component_count": 3,
+      "selected_component_count": 3,
+      "known_band_area_pct": [
+        47.29265928513944,
+        36.49042683716192,
+        16.21691387769863
+      ],
+      "max_center_error_cm1": 0.06241368349265031,
+      "max_area_error_percentage_points": 0.33385293953886475,
+      "accepted_percentages_withheld": false,
+      "metrics": {
+        "snr": 99.07289286381561,
+        "components": 3,
+        "r_squared": 0.9997948724410942,
+        "nrmse": 0.004727510207670739,
+        "residual_lag1": 0.05017522584965702,
+        "durbin_watson": 1.7184425839584176,
+        "sse": 5.834890796301347e-06,
+        "aicc": -823.9250915876164,
+        "bic": -809.4602676901903,
+        "delta_criterion_next_count": 238.24669643893935,
+        "condition_number": 34198.87782178004,
+        "bound_hits": false,
+        "primary_model_admissible": true,
+        "numerical_fit_reliable": true,
+        "quantitative_accepted": true,
+        "bootstrap_success_fraction": 1.0,
+        "bootstrap_count_support": 1.0,
+        "bootstrap_count_comparison_fraction": 1.0,
+        "bootstrap_scope": "Conditional on detected candidates; best admissible original subset per available K; staged refits",
+        "bootstrap_status": "Evaluated",
+        "evaluated_candidate_subsets": 7,
+        "admissible_candidate_subsets": 4,
+        "evaluated_fit_records": 10,
+        "model_search_total_nfev": 212,
+        "bootstrap_success_count": 30,
+        "bootstrap_block_length": 3,
+        "max_area_pct_sd": 0.44344408459565066,
+        "max_structure_pct_sd": 0.44344408459565066,
+        "bootstrap_structure_sd_basis": "Final CI-aware fixed categories; bootstrap component areas summed by final category"
+      },
+      "components": [
+        {
+          "component": 1,
+          "center": 1630.0274904411294,
+          "amplitude": 0.06954522062235177,
+          "fwhm": 20.114811129443247,
+          "area": 1.4887441219927897,
+          "area_pct": 47.456332311101114,
+          "diagnostic_area_pct": 47.456332311101114,
+          "structure": "beta_sheet",
+          "center_ci_low": 1629.9695717143632,
+          "center_ci_high": 1630.1104062726297,
+          "area_pct_sd": 0.16494845075907694,
+          "accepted": true
+        },
+        {
+          "component": 2,
+          "center": 1655.044509373069,
+          "amplitude": 0.059440074917977606,
+          "fwhm": 17.92675168754776,
+          "area": 1.1342614197113732,
+          "area_pct": 36.156573897623055,
+          "diagnostic_area_pct": 36.156573897623055,
+          "structure": "alpha_helix",
+          "center_ci_low": 1654.9543733391333,
+          "center_ci_high": 1655.1456406412585,
+          "area_pct_sd": 0.44344408459565066,
+          "accepted": true
+        },
+        {
+          "component": 3,
+          "center": 1673.9375863165073,
+          "amplitude": 0.02970322585222252,
+          "fwhm": 16.2602356140551,
+          "area": 0.5140765914731174,
+          "area_pct": 16.387093791275827,
+          "diagnostic_area_pct": 16.387093791275827,
+          "structure": "beta_turn",
+          "center_ci_low": 1673.6640394186209,
+          "center_ci_high": 1674.188738566411,
+          "area_pct_sd": 0.3199758911413303,
+          "accepted": true
+        }
+      ]
+    },
+    {
+      "case": "single_peak_with_noise",
+      "notice": "SYNTHETIC VALIDATION ONLY — NOT EXPERIMENTAL OR ANIMAL DATA",
+      "validation_passed": true,
+      "validation_criterion": "Accepted fit recovers centers within 0.5 cm^-1 and areas within 2 percentage points.",
+      "status": "Reliable fit",
+      "warnings": [],
+      "fit_rejection_codes": [],
+      "protocol_blockers": [],
+      "numerical_fit_reliable": true,
+      "quantitative_accepted": true,
+      "resolution_confirmed": true,
+      "known_component_count": 1,
+      "selected_component_count": 1,
+      "known_band_area_pct": [
+        100.0
+      ],
+      "max_center_error_cm1": 0.035280804389003606,
+      "max_area_error_percentage_points": 0.0,
+      "accepted_percentages_withheld": false,
+      "metrics": {
+        "snr": 131.49729853697033,
+        "components": 1,
+        "r_squared": 0.9998311160043608,
+        "nrmse": 0.004175587716728064,
+        "residual_lag1": 0.09919178102472652,
+        "durbin_watson": 1.732230500035327,
+        "sse": 5.926884183736262e-06,
+        "aicc": -839.5007696224504,
+        "bic": -832.4529353015753,
+        "delta_criterion_next_count": null,
+        "condition_number": 802.0492385330755,
+        "bound_hits": false,
+        "primary_model_admissible": true,
+        "numerical_fit_reliable": true,
+        "quantitative_accepted": true,
+        "bootstrap_success_fraction": 1.0,
+        "bootstrap_count_support": 1.0,
+        "bootstrap_count_comparison_fraction": 1.0,
+        "bootstrap_scope": "Conditional on detected candidates; best admissible original subset per available K; staged refits",
+        "bootstrap_status": "Evaluated",
+        "evaluated_candidate_subsets": 3,
+        "admissible_candidate_subsets": 1,
+        "evaluated_fit_records": 5,
+        "model_search_total_nfev": 128,
+        "bootstrap_success_count": 30,
+        "bootstrap_block_length": 3,
+        "max_area_pct_sd": 7.916668416373164e-15,
+        "max_structure_pct_sd": 7.916668416373164e-15,
+        "bootstrap_structure_sd_basis": "Final CI-aware fixed categories; bootstrap component areas summed by final category"
+      },
+      "components": [
+        {
+          "component": 1,
+          "center": 1655.035280804389,
+          "amplitude": 0.07976707754228388,
+          "fwhm": 20.04876157025986,
+          "area": 1.702328673155383,
+          "area_pct": 100.0,
+          "diagnostic_area_pct": 100.0,
+          "structure": "alpha_helix",
+          "center_ci_low": 1655.0184476172244,
+          "center_ci_high": 1655.0644447124905,
+          "area_pct_sd": 7.916668416373164e-15,
+          "accepted": true
+        }
+      ]
+    },
+    {
+      "case": "broad_overlap",
+      "notice": "SYNTHETIC VALIDATION ONLY — NOT EXPERIMENTAL OR ANIMAL DATA",
+      "validation_passed": true,
+      "validation_criterion": "Recover known components if accepted; otherwise withhold uncertain quantitative estimates.",
+      "status": "Unreliable fit",
+      "warnings": [
+        "Остатки имеют выраженную последовательную структуру.",
+        "Контроль качества альтернативной обработки не пройден: alternate_baseline.",
+        "Контроль качества альтернативной обработки не пройден: linear_additional_endpoint_points.",
+        "Контроль качества альтернативной обработки не пройден: alternative_derivative_windows.",
+        "Относительные площади/число компонентов чувствительны к обработке: alternative_derivative_windows."
+      ],
+      "fit_rejection_codes": [
+        "STRUCTURED_RESIDUALS",
+        "PREPROCESSING_VARIANT_QC_FAILED",
+        "PREPROCESSING_AREA_OR_COUNT_INSTABILITY"
+      ],
+      "protocol_blockers": [],
+      "numerical_fit_reliable": false,
+      "quantitative_accepted": false,
+      "resolution_confirmed": true,
+      "known_component_count": 4,
+      "selected_component_count": 2,
+      "known_band_area_pct": [
+        39.13408831477503,
+        35.060221059211536,
+        16.24358724220505,
+        9.5621033838084
+      ],
+      "max_center_error_cm1": null,
+      "max_area_error_percentage_points": null,
+      "accepted_percentages_withheld": true,
+      "metrics": {
+        "snr": 242.06971491174608,
+        "components": 2,
+        "r_squared": 0.9962860042028804,
+        "nrmse": 0.02117902455229711,
+        "residual_lag1": 0.9049388941415832,
+        "durbin_watson": 0.16585108148133854,
+        "sse": 0.00012694181584441404,
+        "aicc": -669.4410136598315,
+        "bic": -658.1378591538555,
+        "delta_criterion_next_count": null,
+        "condition_number": 134021.08699075252,
+        "bound_hits": false,
+        "primary_model_admissible": true,
+        "numerical_fit_reliable": false,
+        "quantitative_accepted": false,
+        "bootstrap_success_fraction": 0.8666666666666667,
+        "bootstrap_count_support": 0.8666666666666667,
+        "bootstrap_count_comparison_fraction": 0.8666666666666667,
+        "bootstrap_scope": "Conditional on detected candidates; best admissible original subset per available K; staged refits",
+        "bootstrap_status": "Evaluated",
+        "evaluated_candidate_subsets": 3,
+        "admissible_candidate_subsets": 1,
+        "evaluated_fit_records": 5,
+        "model_search_total_nfev": 166,
+        "bootstrap_success_count": 26,
+        "bootstrap_block_length": 3,
+        "max_area_pct_sd": 4.340254268912893,
+        "max_structure_pct_sd": 4.340254268912893,
+        "bootstrap_structure_sd_basis": "Final CI-aware fixed categories; bootstrap component areas summed by final category"
+      },
+      "components": [
+        {
+          "component": 1,
+          "center": 1633.240179810128,
+          "amplitude": 0.057169077213709306,
+          "fwhm": 28.228542572214625,
+          "area": 1.7130643384162576,
+          "area_pct": null,
+          "diagnostic_area_pct": 43.07503766394355,
+          "structure": "beta_sheet",
+          "center_ci_low": 1631.9653945335726,
+          "center_ci_high": 1635.027314977998,
+          "area_pct_sd": 4.340254268912893,
+          "accepted": false
+        },
+        {
+          "component": 2,
+          "center": 1661.718482679977,
+          "amplitude": 0.05708978366981252,
+          "fwhm": 37.562995466729994,
+          "area": 2.2638662258260527,
+          "area_pct": null,
+          "diagnostic_area_pct": 56.92496233605646,
+          "structure": "beta_turn",
+          "center_ci_low": 1660.2317298447526,
+          "center_ci_high": 1664.199701749235,
+          "area_pct_sd": 4.340254268912892,
+          "accepted": false
+        }
+      ]
+    },
+    {
+      "case": "assignment_boundary",
+      "notice": "SYNTHETIC VALIDATION ONLY — NOT EXPERIMENTAL OR ANIMAL DATA",
+      "validation_passed": true,
+      "validation_criterion": "Do not force a component on a structural assignment boundary into a protein category.",
+      "status": "Reliable fit",
+      "warnings": [],
+      "fit_rejection_codes": [],
+      "protocol_blockers": [],
+      "numerical_fit_reliable": true,
+      "quantitative_accepted": true,
+      "resolution_confirmed": true,
+      "known_component_count": 1,
+      "selected_component_count": 1,
+      "known_band_area_pct": [
+        100.0
+      ],
+      "max_center_error_cm1": 0.014495995507786574,
+      "max_area_error_percentage_points": 0.0,
+      "accepted_percentages_withheld": false,
+      "metrics": {
+        "snr": 144.8067502292911,
+        "components": 1,
+        "r_squared": 0.9998356158168707,
+        "nrmse": 0.0041173784671233,
+        "residual_lag1": 0.07756562672465192,
+        "durbin_watson": 1.7791843937092242,
+        "sse": 5.752497013032593e-06,
+        "aicc": -841.0835944019735,
+        "bic": -834.0357600810984,
+        "delta_criterion_next_count": null,
+        "condition_number": 809.3046401420196,
+        "bound_hits": false,
+        "primary_model_admissible": true,
+        "numerical_fit_reliable": true,
+        "quantitative_accepted": true,
+        "bootstrap_success_fraction": 1.0,
+        "bootstrap_count_support": 1.0,
+        "bootstrap_count_comparison_fraction": 1.0,
+        "bootstrap_scope": "Conditional on detected candidates; best admissible original subset per available K; staged refits",
+        "bootstrap_status": "Evaluated",
+        "evaluated_candidate_subsets": 1,
+        "admissible_candidate_subsets": 1,
+        "evaluated_fit_records": 2,
+        "model_search_total_nfev": 41,
+        "bootstrap_success_count": 30,
+        "bootstrap_block_length": 3,
+        "max_area_pct_sd": 7.463906562163774e-15,
+        "max_structure_pct_sd": 7.463906562163774e-15,
+        "bootstrap_structure_sd_basis": "Final CI-aware fixed categories; bootstrap component areas summed by final category"
+      },
+      "components": [
+        {
+          "component": 1,
+          "center": 1650.0144959955078,
+          "amplitude": 0.07957035737776619,
+          "fwhm": 20.107757621499964,
+          "area": 1.70312748778018,
+          "area_pct": 100.0,
+          "diagnostic_area_pct": 100.0,
+          "structure": "unassigned",
+          "center_ci_low": 1649.9833619619674,
+          "center_ci_high": 1650.0384371880057,
+          "area_pct_sd": 7.463906562163774e-15,
+          "accepted": true
+        }
+      ]
+    },
+    {
+      "case": "noise_only",
+      "notice": "SYNTHETIC VALIDATION ONLY — NOT EXPERIMENTAL OR ANIMAL DATA",
+      "validation_passed": true,
+      "validation_criterion": "Withhold accepted estimates for noise-only data or unconfirmed instrument resolution.",
+      "status": "Unreliable fit",
+      "warnings": [
+        "Недостаточное отношение сигнала к шуму; подбор компонентов пропущен."
+      ],
+      "fit_rejection_codes": [
+        "LOW_SIGNAL_TO_NOISE"
+      ],
+      "protocol_blockers": [],
+      "numerical_fit_reliable": false,
+      "quantitative_accepted": false,
+      "resolution_confirmed": true,
+      "known_component_count": 0,
+      "selected_component_count": 0,
+      "known_band_area_pct": [],
+      "max_center_error_cm1": null,
+      "max_area_error_percentage_points": null,
+      "accepted_percentages_withheld": true,
+      "metrics": {
+        "numerical_fit_reliable": false,
+        "quantitative_accepted": false,
+        "snr": 3.0235243829165688
+      },
+      "components": []
+    },
+    {
+      "case": "unknown_resolution",
+      "notice": "SYNTHETIC VALIDATION ONLY — NOT EXPERIMENTAL OR ANIMAL DATA",
+      "validation_passed": true,
+      "validation_criterion": "Withhold accepted estimates for noise-only data or unconfirmed instrument resolution.",
+      "status": "Unreliable fit",
+      "warnings": [
+        "Спектральное разрешение прибора не подтверждено; проценты только диагностические."
+      ],
+      "fit_rejection_codes": [],
+      "protocol_blockers": [
+        "INSTRUMENT_RESOLUTION_UNCONFIRMED"
+      ],
+      "numerical_fit_reliable": true,
+      "quantitative_accepted": false,
+      "resolution_confirmed": false,
+      "known_component_count": 3,
+      "selected_component_count": 3,
+      "known_band_area_pct": [
+        47.29265928513944,
+        36.49042683716192,
+        16.21691387769863
+      ],
+      "max_center_error_cm1": 0.06241368349265031,
+      "max_area_error_percentage_points": 0.33385293953886475,
+      "accepted_percentages_withheld": true,
+      "metrics": {
+        "snr": 99.07289286381561,
+        "components": 3,
+        "r_squared": 0.9997948724410942,
+        "nrmse": 0.004727510207670739,
+        "residual_lag1": 0.05017522584965702,
+        "durbin_watson": 1.7184425839584176,
+        "sse": 5.834890796301347e-06,
+        "aicc": -823.9250915876164,
+        "bic": -809.4602676901903,
+        "delta_criterion_next_count": 238.24669643893935,
+        "condition_number": 34198.87782178004,
+        "bound_hits": false,
+        "primary_model_admissible": true,
+        "numerical_fit_reliable": true,
+        "quantitative_accepted": false,
+        "bootstrap_success_fraction": 1.0,
+        "bootstrap_count_support": 1.0,
+        "bootstrap_count_comparison_fraction": 1.0,
+        "bootstrap_scope": "Conditional on detected candidates; best admissible original subset per available K; staged refits",
+        "bootstrap_status": "Evaluated",
+        "evaluated_candidate_subsets": 7,
+        "admissible_candidate_subsets": 4,
+        "evaluated_fit_records": 10,
+        "model_search_total_nfev": 212,
+        "bootstrap_success_count": 30,
+        "bootstrap_block_length": 3,
+        "max_area_pct_sd": 0.44344408459565066,
+        "max_structure_pct_sd": 0.44344408459565066,
+        "bootstrap_structure_sd_basis": "Final CI-aware fixed categories; bootstrap component areas summed by final category"
+      },
+      "components": [
+        {
+          "component": 1,
+          "center": 1630.0274904411294,
+          "amplitude": 0.06954522062235177,
+          "fwhm": 20.114811129443247,
+          "area": 1.4887441219927897,
+          "area_pct": null,
+          "diagnostic_area_pct": 47.456332311101114,
+          "structure": "beta_sheet",
+          "center_ci_low": 1629.9695717143632,
+          "center_ci_high": 1630.1104062726297,
+          "area_pct_sd": 0.16494845075907694,
+          "accepted": false
+        },
+        {
+          "component": 2,
+          "center": 1655.044509373069,
+          "amplitude": 0.059440074917977606,
+          "fwhm": 17.92675168754776,
+          "area": 1.1342614197113732,
+          "area_pct": null,
+          "diagnostic_area_pct": 36.156573897623055,
+          "structure": "alpha_helix",
+          "center_ci_low": 1654.9543733391333,
+          "center_ci_high": 1655.1456406412585,
+          "area_pct_sd": 0.44344408459565066,
+          "accepted": false
+        },
+        {
+          "component": 3,
+          "center": 1673.9375863165073,
+          "amplitude": 0.02970322585222252,
+          "fwhm": 16.2602356140551,
+          "area": 0.5140765914731174,
+          "area_pct": null,
+          "diagnostic_area_pct": 16.387093791275827,
+          "structure": "beta_turn",
+          "center_ci_low": 1673.6640394186209,
+          "center_ci_high": 1674.188738566411,
+          "area_pct_sd": 0.3199758911413303,
+          "accepted": false
+        }
+      ]
+    }
+  ],
+  "limitations": [
+    "Validation covers these Gaussian examples, not arbitrary real FTIR bands.",
+    "Detected derivative minima need not reveal all generating components.",
+    "Component labels and areas do not measure absolute protein abundance.",
+    "Real instrument resolution remains unconfirmed until supplied by the experimenter."
+  ]
+}

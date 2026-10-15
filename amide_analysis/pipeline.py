@@ -6,6 +6,7 @@ import hashlib
 import json
 from pathlib import Path
 import platform
+from time import perf_counter
 import traceback
 
 import matplotlib
@@ -14,6 +15,7 @@ import openpyxl
 import pandas as pd
 import scipy
 
+from . import __version__
 from .config import load_config
 from .fitting import STRUCTURES, analyze_band
 from .io import discover_inputs, read_spectrum
@@ -90,27 +92,39 @@ def run_analysis(input_dir, output_dir=None, config=None, metadata_path=None, pr
         log.append(text)
         progress(text)
 
+    say(f"Папка результатов: {output_dir}")
+    say(f"Итоговый Excel будет сохранён: {output_dir / 'Amide_I_Results.xlsx'}")
     say(f"Найдено спектров: {len(metadata)}; животных: {metadata['animal_id'].nunique()}; "
         f"групп: {metadata['group'].nunique()}.")
     if not config["resolution_confirmed"]:
-        say("Приборное разрешение неизвестно. Разложения будут диагностическими; "
-            "их проценты не войдут в групповой статистический анализ.")
+        say("Приборное разрешение не подтверждено. Это ограничение протокола, "
+            "а не оценка качества спектра. Диагностические площади будут сохранены "
+            "в Diagnostic_Structure; они не войдут в групповой статистический анализ.")
+    else:
+        say(f"Подтверждённое приборное разрешение: {config['spectral_resolution_cm1']:g} см⁻¹. "
+            "Шаг экспортированных точек проверяется отдельно.")
     rows = {name: [] for name in ("Raw_Spectra", "Processed_Spectra", "Second_Derivative",
         "Peak_Parameters", "Fit_Quality", "Spectrum_Results", "Derivative_Candidates",
-        "Model_Comparison", "Sensitivity", "Unreliable_Spectra")}
+        "Model_Comparison", "Sensitivity", "Unreliable_Spectra", "Diagnostic_Structure",
+        "Bootstrap_Diagnostics")}
     figures = []
+    readable_spectra = calculated_fits = numerically_stable_spectra = 0
     metadata = metadata.copy()
     for number, record in enumerate(metadata.to_dict("records"), start=1):
+        spectrum_started = perf_counter()
         spectrum_id, path = record["spectrum_id"], Path(record["file"])
         say(f"[{number}/{len(metadata)}] {path.name}")
         raw = processed = fit = None
         quality = {"spectrum_id": spectrum_id, "file": str(path), "animal_id": record["animal_id"],
-                   "group": record["group"], "status": "Failed", "warnings": ""}
+                   "group": record["group"], "status": "Failed", "warnings": "",
+                   "numerical_fit_reliable": False, "quantitative_accepted": False,
+                   "fit_rejection_codes": "[]", "protocol_blockers": "[]"}
         result = {"spectrum_id": spectrum_id, "status": "Failed", **{key: np.nan for key in STRUCTURES}}
         messages = []
         try:
             metadata.loc[metadata["spectrum_id"] == spectrum_id, "sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
             raw = read_spectrum(path)
+            readable_spectra += 1
             messages.extend(raw["warnings"])
             original = raw.get("raw_table", pd.DataFrame({"wavenumber": raw["x"], "absorbance": raw["y"]}))
             for item in original.to_dict("records"):
@@ -119,21 +133,57 @@ def run_analysis(input_dir, output_dir=None, config=None, metadata_path=None, pr
             messages.extend(processed["warnings"])
             variants, failures = _processing_variants(raw, config)
             processed["sensitivity_variants"] = variants
-            fit = analyze_band(processed, config, _seed(config, spectrum_id))
+            say("  Данные прочитаны; выполняются подгонки моделей и проверки устойчивости.")
+            fit = analyze_band(processed, config, _seed(config, spectrum_id),
+                               progress=lambda message: say(f"  {message}"))
             if failures:
                 fit["status"] = "Unreliable fit"
                 fit["warnings"].extend(failures)
+                fit["numerical_fit_reliable"] = False
+                fit["quantitative_accepted"] = False
+                fit.setdefault("fit_rejection_codes", []).append("SENSITIVITY_VARIANT_UNAVAILABLE")
                 fit["percentages"] = {key: np.nan for key in STRUCTURES}
                 for component in fit["components"]:
                     component["accepted"] = False
                     component["area_pct"] = np.nan
+            numeric_reliable = bool(fit.get("numerical_fit_reliable", fit["status"] == "Reliable fit"))
+            quantitative_accepted = bool(fit.get("quantitative_accepted", fit["status"] == "Reliable fit")
+                                         and numeric_reliable and config["resolution_confirmed"])
+            rejection_codes = list(dict.fromkeys(fit.get("fit_rejection_codes", [])))
+            protocol_blockers = list(dict.fromkeys(fit.get("protocol_blockers", [])))
+            if not config["resolution_confirmed"] and not protocol_blockers:
+                protocol_blockers.append("INSTRUMENT_RESOLUTION_UNCONFIRMED")
+            # Only scientifically accepted percentages can enter animal aggregation.
+            if not quantitative_accepted:
+                if fit["status"] == "Reliable fit":
+                    fit["status"] = "Diagnostic fit" if numeric_reliable else "Unreliable fit"
+                fit["percentages"] = {key: np.nan for key in STRUCTURES}
+            else:
+                fit["status"] = "Reliable fit"
+            numerically_stable_spectra += int(numeric_reliable)
+            if fit["metrics"].get("components", 0) and np.isfinite(fit["fit"]).all():
+                calculated_fits += 1
             messages.extend(fit["warnings"])
             quality.update({"status": fit["status"], "raw_rows": raw["raw_rows"],
                 "cleaned_rows": raw["cleaned_rows"], "band_points": len(processed["x"]),
                 "grid_step_cm1": processed["step"], "noise_sd": processed["noise_sd"],
                 "source_step_cm1": processed["source_step"],
-                "normalization_factor": processed["normalization_factor"], **fit["metrics"]})
+                "normalization_factor": processed["normalization_factor"], **fit["metrics"],
+                "numerical_fit_reliable": numeric_reliable,
+                "quantitative_accepted": quantitative_accepted,
+                "fit_rejection_codes": json.dumps(rejection_codes, ensure_ascii=False),
+                "protocol_blockers": json.dumps(protocol_blockers, ensure_ascii=False)})
             result.update({"status": fit["status"], **fit["percentages"]})
+            rows["Diagnostic_Structure"].append({
+                "spectrum_id": spectrum_id, "animal_id": record["animal_id"], "group": record["group"],
+                "percentage_basis": "Diagnostic only — not accepted for biological inference; relative fitted spectral areas",
+                **{key: fit.get("diagnostic_percentages", {}).get(key, np.nan) for key in STRUCTURES},
+                "numerical_fit_reliable": numeric_reliable, "quantitative_accepted": quantitative_accepted,
+                "fit_rejection_codes": json.dumps(rejection_codes, ensure_ascii=False),
+                "protocol_blockers": json.dumps(protocol_blockers, ensure_ascii=False)})
+            for item in fit.get("bootstrap_diagnostics", []):
+                rows["Bootstrap_Diagnostics"].append({**item, "spectrum_id": spectrum_id,
+                    "animal_id": record["animal_id"], "group": record["group"]})
             for index, x in enumerate(processed["x"]):
                 rows["Processed_Spectra"].append({"spectrum_id": spectrum_id, "wavenumber": x,
                     **{key: processed[key][index] for key in ("raw", "baseline", "corrected", "smoothed")},
@@ -147,19 +197,40 @@ def run_analysis(input_dir, output_dir=None, config=None, metadata_path=None, pr
                           "model_comparison": "Model_Comparison", "sensitivity": "Sensitivity"}[key]
                 for item in fit[key]:
                     rows[target].append({"spectrum_id": spectrum_id, **item})
-            say(f"  {fit['status']}; компонентов: {fit['metrics'].get('components', 0)}.")
+            say(f"  {fit['status']}; компонентов: {fit['metrics'].get('components', 0)}; "
+                f"численно устойчиво: {'да' if numeric_reliable else 'нет'}; "
+                f"допущено к количественной статистике: {'да' if quantitative_accepted else 'нет'}.")
+            if rejection_codes:
+                say("  Причины отклонения модели: " + ", ".join(rejection_codes))
+            if protocol_blockers:
+                say("  Ограничения протокола: " + ", ".join(protocol_blockers))
         except (ValueError, OSError, RuntimeError, np.linalg.LinAlgError) as exc:
             messages.append(str(exc))
+            quality["fit_rejection_codes"] = json.dumps(["SPECTRUM_PROCESSING_FAILED"])
+            if not config["resolution_confirmed"]:
+                quality["protocol_blockers"] = json.dumps(["INSTRUMENT_RESOLUTION_UNCONFIRMED"])
             say(f"  Failed: {exc}")
             (output_dir / f"error_{number:04d}.txt").write_text(traceback.format_exc(), encoding="utf-8")
         quality["warnings"] = " | ".join(dict.fromkeys(messages))
+        quality["analysis_seconds"] = float(perf_counter() - spectrum_started)
+        say(f"  Анализ данных спектра: {quality['analysis_seconds']:.1f} с "
+            "(без сохранения графиков).")
         result["warnings"] = quality["warnings"]
+        if result["status"] == "Failed":
+            rows["Diagnostic_Structure"].append({
+                "spectrum_id": spectrum_id, "animal_id": record["animal_id"], "group": record["group"],
+                "percentage_basis": "No diagnostic percentages — spectrum processing failed",
+                **{key: np.nan for key in STRUCTURES}, "numerical_fit_reliable": False,
+                "quantitative_accepted": False, "fit_rejection_codes": quality["fit_rejection_codes"],
+                "protocol_blockers": quality["protocol_blockers"]})
         rows["Fit_Quality"].append(quality)
         rows["Spectrum_Results"].append(result)
         if result["status"] != "Reliable fit":
             rows["Unreliable_Spectra"].append({"spectrum_id": spectrum_id, "file": str(path),
                 "animal_id": record["animal_id"], "group": record["group"],
-                "status": result["status"], "reason": quality["warnings"]})
+                "status": result["status"], "reason": quality["warnings"],
+                "fit_rejection_codes": quality["fit_rejection_codes"],
+                "protocol_blockers": quality["protocol_blockers"]})
         if raw is not None:
             try:
                 figures.extend(plot_spectrum(raw, processed, fit, figures_dir, f"spectrum_{number:04d}", config))
@@ -187,16 +258,30 @@ def run_analysis(input_dir, output_dir=None, config=None, metadata_path=None, pr
             {"key": "numpy", "value": np.__version__}, {"key": "pandas", "value": pd.__version__},
             {"key": "scipy", "value": scipy.__version__}, {"key": "matplotlib", "value": matplotlib.__version__},
             {"key": "openpyxl", "value": openpyxl.__version__},
-            {"key": "software_version", "value": "1.0.0"},
+            {"key": "software_version", "value": __version__},
             {"key": "interpretation", "value": "Relative spectral component areas, not absolute secondary-structure content"},
         ])}
     for key in ("Spectrum_Results", "Derivative_Candidates", "Model_Comparison", "Sensitivity", "Unreliable_Spectra"):
         tables[key] = _empty_frame(rows[key], ["spectrum_id", "status"])
+    tables["Diagnostic_Structure"] = _empty_frame(rows["Diagnostic_Structure"],
+        ["spectrum_id", "animal_id", "group", "percentage_basis", *STRUCTURES,
+         "numerical_fit_reliable", "quantitative_accepted", "fit_rejection_codes", "protocol_blockers"])
+    tables["Bootstrap_Diagnostics"] = _empty_frame(rows["Bootstrap_Diagnostics"],
+        ["spectrum_id", "animal_id", "group", "iteration", "status"])
     tables["Animal_Diagnostics"] = diagnostics
+    say("Сохраняются Excel и CSV-таблицы, затем групповые графики.")
     excel = export_results(output_dir, tables, config)
     figures.extend(plot_groups(animals, tests, figures_dir, config))
     reliable = int(animals["status"].eq("Reliable fit").sum())
-    say(f"Пригодные животные: {reliable}/{len(animals)}. Excel: {excel}")
+    say(f"Прочитано спектров: {readable_spectra}/{len(metadata)}; "
+        f"рассчитано разложений: {calculated_fits}/{len(metadata)}; "
+        f"численно устойчивых разложений: {numerically_stable_spectra}/{len(metadata)}.")
+    say(f"Животных, допущенных к количественному сравнению: {reliable}/{len(animals)}.")
+    say(f"Excel сохранён: {excel}")
+    say(f"Папка всех результатов: {output_dir}")
+    say(f"Причины отклонения и ограничения протокола: {output_dir / 'Fit_Quality.csv'}")
+    say(f"Диагностические площади: {output_dir / 'Diagnostic_Structure.csv'}")
+    say(f"Подробности bootstrap: {output_dir / 'Bootstrap_Diagnostics.csv'}")
     say("Проценты характеризуют относительные площади спектральных компонентов; "
         "это не измерение абсолютного содержания структур конкретных белков.")
     (output_dir / "analysis_log.txt").write_text("\n".join(log), encoding="utf-8")
