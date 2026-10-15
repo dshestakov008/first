@@ -41,9 +41,11 @@ class BootstrapRetryConfigurationTests(unittest.TestCase):
         loaded = load_config({"fitting": {"bootstrap_retry_multistarts": 1}})
         self.assertEqual(loaded["fitting"]["bootstrap_retry_multistarts"], 1)
 
-    def test_saved_defaults_match_python_defaults(self):
+    def test_project_config_confirms_user_instrument_without_changing_qc_gates(self):
         path = Path(__file__).resolve().parents[1] / "analysis_config.json"
-        self.assertEqual(load_config(path), default_config())
+        expected = default_config()
+        expected["resolution_confirmed"] = True
+        self.assertEqual(load_config(path), expected)
 
 
 if __name__ == "__main__":

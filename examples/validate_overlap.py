@@ -52,6 +52,11 @@ def validation_cases():
          "resolution_confirmed": True, "require_recovery": True},
         {"name": "single_peak_with_noise", "parameters": [(0.08, 1655.0, 20.0)],
          "resolution_confirmed": True, "require_recovery": True},
+        {"name": "wide_single_edge_tail", "parameters": [(0.08, 1630.0, 36.0)],
+         "resolution_confirmed": True, "require_recovery": True},
+        {"name": "wide_two_edge_tails", "parameters": [(0.07, 1628.0, 30.0),
+                                                       (0.06, 1674.0, 32.0)],
+         "resolution_confirmed": True, "require_recovery": True},
         {"name": "broad_overlap", "parameters": broad,
          "resolution_confirmed": True, "require_recovery": False},
         {"name": "assignment_boundary", "parameters": [(0.08, 1650.0, 20.0)],
@@ -101,22 +106,26 @@ def summarize(case, fit, truth):
     """An accepted decomposition must recover truth to claim validation."""
     components = fit["components"]
     count_matches = len(components) == len(case["parameters"])
-    center_error = area_error = None
+    center_error = width_error = area_error = None
     if components and count_matches:
         center_error = float(np.max(np.abs(
             np.array([row["center"] for row in components])
             - np.array([row[1] for row in case["parameters"]]))))
+        width_error = float(np.max(np.abs(
+            np.array([row["fwhm"] for row in components])
+            - np.array([row[2] for row in case["parameters"]]))))
         area_error = float(np.max(np.abs(
             np.array([row["diagnostic_area_pct"] for row in components]) - truth)))
     reliable = fit["status"] == "Reliable fit"
     recovery = (count_matches and center_error is not None
-                and center_error <= 0.5 and area_error <= 2.0)
+                and center_error <= 0.5 and width_error <= 0.6 and area_error <= 2.0)
     withheld = (all(np.isnan(value) for value in fit["percentages"].values())
                 and all(np.isnan(row["area_pct"]) and not row["accepted"]
                         for row in components))
     if case["require_recovery"]:
         passed = reliable and recovery
-        criterion = "Accepted fit recovers centers within 0.5 cm^-1 and areas within 2 percentage points."
+        criterion = ("Accepted fit recovers centers within 0.5 cm^-1, FWHM within "
+                     "0.6 cm^-1, and areas within 2 percentage points.")
     elif case["name"] == "broad_overlap":
         passed = (reliable and recovery) or (not reliable and withheld)
         criterion = "Recover known components if accepted; otherwise withhold uncertain quantitative estimates."
@@ -140,6 +149,7 @@ def summarize(case, fit, truth):
         "selected_component_count": len(components),
         "known_band_area_pct": truth.tolist(),
         "max_center_error_cm1": center_error,
+        "max_fwhm_error_cm1": width_error,
         "max_area_error_percentage_points": area_error,
         "accepted_percentages_withheld": bool(withheld),
         "metrics": fit["metrics"], "components": components,

@@ -136,6 +136,14 @@ def run_analysis(input_dir, output_dir=None, config=None, metadata_path=None, pr
             say("  Данные прочитаны; выполняются подгонки моделей и проверки устойчивости.")
             fit = analyze_band(processed, config, _seed(config, spectrum_id),
                                progress=lambda message: say(f"  {message}"))
+            baseline_adjustment = np.asarray(
+                fit.get("baseline_adjustment", np.zeros_like(processed["x"])), dtype=float)
+            if baseline_adjustment.shape != np.asarray(processed["x"]).shape:
+                raise ValueError("Поправка совместно уточнённой базовой линии не совпадает с сеткой спектра")
+            refined_baseline = (np.asarray(processed["baseline"])
+                                + baseline_adjustment * processed["normalization_factor"])
+            corrected_refined = np.asarray(processed["corrected"]) - baseline_adjustment
+            gaussian_fit = np.asarray(fit["fit"]) - baseline_adjustment
             if failures:
                 fit["status"] = "Unreliable fit"
                 fit["warnings"].extend(failures)
@@ -169,6 +177,8 @@ def run_analysis(input_dir, output_dir=None, config=None, metadata_path=None, pr
                 "grid_step_cm1": processed["step"], "noise_sd": processed["noise_sd"],
                 "source_step_cm1": processed["source_step"],
                 "normalization_factor": processed["normalization_factor"], **fit["metrics"],
+                "baseline_coefficients": json.dumps(
+                    np.asarray(fit.get("baseline_coefficients", []), dtype=float).tolist()),
                 "numerical_fit_reliable": numeric_reliable,
                 "quantitative_accepted": quantitative_accepted,
                 "fit_rejection_codes": json.dumps(rejection_codes, ensure_ascii=False),
@@ -187,6 +197,10 @@ def run_analysis(input_dir, output_dir=None, config=None, metadata_path=None, pr
             for index, x in enumerate(processed["x"]):
                 rows["Processed_Spectra"].append({"spectrum_id": spectrum_id, "wavenumber": x,
                     **{key: processed[key][index] for key in ("raw", "baseline", "corrected", "smoothed")},
+                    "baseline_adjustment": baseline_adjustment[index],
+                    "refined_baseline": refined_baseline[index],
+                    "corrected_refined": corrected_refined[index],
+                    "gaussian_fit": gaussian_fit[index],
                     "fit": fit["fit"][index], "residual": fit["residuals"][index]})
                 for window, derivative in processed["derivatives"].items():
                     rows["Second_Derivative"].append({"spectrum_id": spectrum_id, "wavenumber": x,
@@ -244,7 +258,8 @@ def run_analysis(input_dir, output_dir=None, config=None, metadata_path=None, pr
     tables = {"Metadata": metadata,
         "Raw_Spectra": _empty_frame(rows["Raw_Spectra"], ["spectrum_id", "source_row", "wavenumber", "absorbance"]),
         "Processed_Spectra": _empty_frame(rows["Processed_Spectra"],
-            ["spectrum_id", "wavenumber", "raw", "baseline", "corrected", "smoothed", "fit", "residual"]),
+            ["spectrum_id", "wavenumber", "raw", "baseline", "corrected", "smoothed",
+             "baseline_adjustment", "refined_baseline", "corrected_refined", "gaussian_fit", "fit", "residual"]),
         "Second_Derivative": _empty_frame(rows["Second_Derivative"],
             ["spectrum_id", "wavenumber", "window_points", "window_cm1", "second_derivative"]),
         "Peak_Parameters": _empty_frame(rows["Peak_Parameters"],
@@ -260,6 +275,9 @@ def run_analysis(input_dir, output_dir=None, config=None, metadata_path=None, pr
             {"key": "openpyxl", "value": openpyxl.__version__},
             {"key": "software_version", "value": __version__},
             {"key": "interpretation", "value": "Relative spectral component areas, not absolute secondary-structure content"},
+            {"key": "fit_model", "value": "Gaussian components plus a jointly profiled linear baseline; two baseline coefficients are nuisance parameters counted in AICc/BIC"},
+            {"key": "processed_spectra_units", "value": "raw, baseline and refined_baseline are in original absorbance units; corrected, smoothed, baseline_adjustment, corrected_refined, gaussian_fit, fit and residual are divided by normalization_factor"},
+            {"key": "processed_spectra_reconstruction", "value": "refined_baseline = baseline + baseline_adjustment * normalization_factor; corrected_refined = corrected - baseline_adjustment; gaussian_fit = fit - baseline_adjustment; raw = refined_baseline + normalization_factor * (gaussian_fit + residual)"},
         ])}
     for key in ("Spectrum_Results", "Derivative_Candidates", "Model_Comparison", "Sensitivity", "Unreliable_Spectra"):
         tables[key] = _empty_frame(rows[key], ["spectrum_id", "status"])

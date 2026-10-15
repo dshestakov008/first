@@ -143,6 +143,8 @@ def _is_admissible(model):
 def _bounded_fit(x, y, centers, config, rng, starts=None, initial=None):
     """Fit ordered centers across the band, using softmax gaps and physical bounds.
 
+    An affine baseline correction is profiled by ordinary least squares at
+    every trial, so endpoint subtraction cannot distort Gaussian tail areas.
     Derivative minima initialize the optimizer only. K free logits parameterize
     K+1 positive gaps whose sum fills the available span after minimum center
     separations. A fixed final logit removes the softmax translation ambiguity.
@@ -153,8 +155,19 @@ def _bounded_fit(x, y, centers, config, rng, starts=None, initial=None):
     separation, minimum, maximum, span = _fit_geometry(x, config, count)
     if not count or minimum >= maximum or span <= 0:
         return None
-    scale = max(float(np.max(np.abs(y))), np.finfo(float).tiny)
+    halfspan = float(np.ptp(x) / 2)
+    midpoint = float(np.mean(x))
+    baseline_basis = np.column_stack((np.ones(len(x)), (x - midpoint) / halfspan))
+    baseline_inverse = np.linalg.pinv(baseline_basis)
+
+    def without_line(values):
+        return values - baseline_basis @ (baseline_inverse @ values)
+
+    # This scale and the Gaussian parameter bounds must be invariant to an
+    # irrelevant offset or slope in the initial baseline estimate.
+    scale = max(float(np.max(np.abs(without_line(y)))), np.finfo(float).tiny)
     target = y / scale
+    profiled_target = without_line(target)
     lower = np.r_[np.tile([0.0, minimum], count), np.full(count, -20.0)]
     upper = np.r_[np.tile([3.0, maximum], count), np.full(count, 20.0)]
 
@@ -186,8 +199,9 @@ def _bounded_fit(x, y, centers, config, rng, starts=None, initial=None):
         params, center_derivative = decode(vector, with_derivative=True)
         physical = _jacobian(x, params)
         amplitude_width_columns = np.array([[3 * j, 3 * j + 2] for j in range(count)]).ravel()
-        return np.column_stack((physical[:, amplitude_width_columns],
-                                physical[:, 1::3] @ center_derivative))
+        derivative = np.column_stack((physical[:, amplitude_width_columns],
+                                      physical[:, 1::3] @ center_derivative))
+        return without_line(derivative)
 
     starts = config["fitting"]["multistarts"] if starts is None else starts
     best = None
@@ -202,10 +216,10 @@ def _bounded_fit(x, y, centers, config, rng, starts=None, initial=None):
             if start:
                 widths *= rng.uniform(0.65, 1.4, count)
                 candidate_centers += rng.normal(0, max(separation, 6.0) / 2, count)
-            amplitudes = np.maximum(np.interp(candidate_centers, x, target), 0.05)
+            amplitudes = np.maximum(np.interp(candidate_centers, x, profiled_target), 0.05)
             guess = np.column_stack((amplitudes, candidate_centers, widths))
         try:
-            result = least_squares(lambda vector: _model(x, decode(vector)) - target,
+            result = least_squares(lambda vector: without_line(_model(x, decode(vector))) - profiled_target,
                 encode(guess), jac=jacobian, bounds=(lower, upper), x_scale="jac",
                 max_nfev=config["fitting"]["max_nfev"], ftol=1e-9, xtol=1e-9, gtol=1e-9)
         except (ValueError, FloatingPointError, np.linalg.LinAlgError):
@@ -215,15 +229,28 @@ def _bounded_fit(x, y, centers, config, rng, starts=None, initial=None):
             continue
         normalized = decode(result.x)
         physical_jacobian = _jacobian(x, normalized)
-        condition = float(np.linalg.cond(physical_jacobian.T @ physical_jacobian))
+        full_jacobian = np.column_stack((physical_jacobian, baseline_basis))
+        condition = float(np.linalg.cond(full_jacobian.T @ full_jacobian))
         params = normalized.copy()
         params[:, 0] *= scale
         sse = float(np.sum(result.fun ** 2) * scale ** 2)
-        k, n = 3 * count + 1, len(x)  # Include fitted residual variance.
+        # Two jointly estimated affine baseline coefficients and residual
+        # variance count alongside the three physical parameters per peak.
+        k, n = 3 * count + 3, len(x)
         likelihood = n * math.log(max(sse / n, np.finfo(float).tiny))
         aic = likelihood + 2 * k
         aicc = aic + 2 * k * (k + 1) / (n - k - 1) if n > k + 1 else np.inf
-        model = {"params": params, "fit": _model(x, params), "sse": sse,
+        gaussian_fit = _model(x, params)
+        baseline_coefficients = baseline_inverse @ (y - gaussian_fit)
+        baseline_adjustment = baseline_basis @ baseline_coefficients
+        model = {"params": params, "fit": gaussian_fit + baseline_adjustment,
+            "gaussian_fit": gaussian_fit, "baseline_adjustment": baseline_adjustment,
+            "baseline_coefficients": baseline_coefficients,
+            "baseline_offset": float(baseline_coefficients[0]),
+            "baseline_slope": float(baseline_coefficients[1] / halfspan),
+            "baseline_basis_center_cm1": midpoint, "baseline_basis_halfspan_cm1": halfspan,
+            "baseline_parameter_count": 2,
+            "parameter_count": k, "sse": sse,
             "aicc": float(aicc), "bic": float(likelihood + k * math.log(n)),
             "count": count, "condition_number": condition, "amplitude_scale": scale,
             "initial_centers": centers.copy(), "nfev": int(result.nfev)}
@@ -432,6 +459,8 @@ def analyze_band(processed, config, seed=None, progress=None):
         warnings.append("Спектральное разрешение прибора не подтверждено; проценты только диагностические.")
     empty = {"status": "Unreliable fit", "warnings": warnings, "components": [], "candidates": [],
         "model_comparison": [], "fit": np.full(len(x), np.nan), "residuals": np.full(len(x), np.nan),
+        "baseline_adjustment": np.zeros(len(x)), "baseline_coefficients": np.array([]),
+        "gaussian_fit": np.full(len(x), np.nan),
         "metrics": {"numerical_fit_reliable": False, "quantitative_accepted": False},
         "percentages": {name: np.nan for name in STRUCTURES}, "sensitivity": [],
         "numerical_fit_reliable": False, "quantitative_accepted": False,
@@ -522,12 +551,36 @@ def analyze_band(processed, config, seed=None, progress=None):
     if boot["success_count"] >= 2:
         intervals = np.percentile(boot["parameters"][:, :, 1], [2.5, 97.5], axis=0).T
         area_sd = np.std(boot["percentages"], axis=0, ddof=1)
-    areas, relative, categories, fractions = _percentages(best, config, intervals)
+    # Fit every preprocessing alternative before assigning structure labels.
+    # One envelope is shared by the primary result, bootstrap summaries, and
+    # all aligned alternatives: a label must cover the bootstrap interval and
+    # every physically admissible same-K alternative center (with tolerance).
+    # The envelope is not itself a confidence interval.
+    assignment_intervals = intervals.copy()
+    tolerance = config["assignment_boundary_tolerance_cm1"]
+    assignment_intervals[:, 0] = np.minimum(assignment_intervals[:, 0], best["params"][:, 1] - tolerance)
+    assignment_intervals[:, 1] = np.maximum(assignment_intervals[:, 1], best["params"][:, 1] + tolerance)
+    alternate_results = []
+    if primary_admissible:
+        report("Проверка чувствительности к базовой линии и окнам производной.")
+        for variant in processed.get("sensitivity_variants", []):
+            alternate, _, _ = _select_model(variant["processed"], config, rng)
+            alternate_results.append((variant, alternate))
+            if alternate is not None and admissible(alternate) and alternate["count"] == count:
+                centers = np.asarray(alternate["params"])[:, 1]
+                assignment_intervals[:, 0] = np.minimum(assignment_intervals[:, 0], centers - tolerance)
+                assignment_intervals[:, 1] = np.maximum(assignment_intervals[:, 1], centers + tolerance)
+
+    areas, relative, categories, fractions = _percentages(best, config, assignment_intervals)
+    category_array = np.asarray(categories)
+
+    def assigned_fractions(component_percentages):
+        return {name: float(np.sum(component_percentages[category_array == name]))
+                for name in STRUCTURES}
+
     if boot["success_count"] >= 2:
-        # Classify once using the final confidence intervals. Reclassifying
-        # every bootstrap center against nominal boundaries would test a
-        # different estimator and falsely report label switching as area SD.
-        category_array = np.asarray(categories)
+        # Reuse the final shared assignment for every bootstrap area vector;
+        # nominal label switching does not measure area instability.
         samples = np.asarray(boot["percentages"])
         final_structure_samples = np.column_stack([
             samples[:, category_array == name].sum(axis=1) for name in STRUCTURES])
@@ -537,9 +590,7 @@ def analyze_band(processed, config, seed=None, progress=None):
                 or np.max(structure_sd) > fc["max_percentage_sd"]):
             reject("BOOTSTRAP_AREA_INSTABILITY", "Относительные площади/классификация неустойчивы в bootstrap.")
 
-    # Baseline/derivative sensitivity compares nominal-center assignments on
-    # both sides, independently of the final CI-aware Unassigned labels.
-    _, _, _, sensitivity_reference = _percentages(best, config)
+    _, _, nominal_categories, nominal_reference = _percentages(best, config)
     if not np.isfinite(relative).all() or np.any(relative < fc["min_component_area_pct"]):
         reject("NEGLIGIBLE_OR_INVALID_COMPONENT_AREA", "Модель включает компонент с пренебрежимо малой или недопустимой площадью.")
     if np.any(np.diff(best["params"][:, 1]) < max(config["spectral_resolution_cm1"],
@@ -547,9 +598,7 @@ def analyze_band(processed, config, seed=None, progress=None):
         reject("UNRESOLVED_COMPONENT_SEPARATION", "Компоненты разделены хуже разрешения/шага исходного измерения.")
     sensitivity = []
     if primary_admissible:
-        report("Проверка чувствительности к базовой линии и окнам производной.")
-        for variant in processed.get("sensitivity_variants", []):
-            alternate, _, _ = _select_model(variant["processed"], config, rng)
+        for variant, alternate in alternate_results:
             if alternate is None:
                 sensitivity.append({"variant": variant["label"], "status": "Unresolved",
                                     "max_delta_pct": np.nan, "components": np.nan})
@@ -565,19 +614,48 @@ def analyze_band(processed, config, seed=None, progress=None):
             alt_valid = (admissible(alternate) and np.isfinite(alt_nrmse)
                          and alt_nrmse <= fc["max_nrmse"] and np.isfinite(alt_lag)
                          and abs(alt_lag) <= fc["max_residual_lag1"] and alt_snr >= fc["min_fit_snr"])
-            _, _, _, alt_fractions = _percentages(alternate, config)
-            shift = max(abs(alt_fractions[key] - sensitivity_reference[key]) for key in STRUCTURES)
+            _, alt_relative, alt_nominal_categories, alt_nominal_fractions = _percentages(alternate, config)
+            nominal_shift = max(abs(alt_nominal_fractions[key] - nominal_reference[key])
+                                for key in STRUCTURES)
+            same_count = alternate["count"] == count
+            aligned = same_count and admissible(alternate)
+            if aligned:
+                alt_fractions = assigned_fractions(alt_relative)
+                component_shift = float(np.max(np.abs(alt_relative - relative)))
+                structure_shift = max(abs(alt_fractions[key] - fractions[key]) for key in STRUCTURES)
+                shift = max(component_shift, structure_shift)
+                center_shift = float(np.max(np.abs(alternate["params"][:, 1] - best["params"][:, 1])))
+                assignment_changes = [{"component": index + 1, "primary": primary_label,
+                    "variant": alternate_label} for index, (primary_label, alternate_label)
+                    in enumerate(zip(nominal_categories, alt_nominal_categories))
+                    if primary_label != alternate_label]
+                basis = "Shared assignment from primary bootstrap CI and all admissible same-count variant centers; component and structure area changes evaluated separately"
+            else:
+                # Different K cannot be matched component by component. Its
+                # own nominal fractions remain diagnostic; count/QC failure
+                # is explicit, without inventing an aligned percentage delta.
+                alt_fractions = alt_nominal_fractions
+                component_shift = structure_shift = shift = center_shift = np.nan
+                assignment_changes = []
+                basis = "Diagnostic nominal-center assignment only; no aligned area comparison for different-count or inadmissible model"
             sensitivity.append({"variant": variant["label"], "status": "Evaluated" if alt_valid else "QC failed",
-                "percentage_basis": "Diagnostic nominal-center assignment for both primary and variant",
+                "percentage_basis": basis,
                 "diagnostic_only": True, "admissible": admissible(alternate),
                 "admissibility_reasons": alternate.get("admissibility_reasons", []),
-                "max_delta_pct": shift, "components": alternate["count"], "bound_hits": alternate["bound_hits"],
+                "max_delta_pct": shift, "max_component_area_delta_pct": component_shift,
+                "max_structure_delta_pct": structure_shift,
+                "nominal_center_assignment_delta_pct": nominal_shift,
+                "nominal_assignment_changes": assignment_changes,
+                "nominal_assignment_change_count": len(assignment_changes) if same_count else np.nan,
+                "max_center_shift_cm1": center_shift, "aligned_component_comparison": aligned,
+                "component_count_changed": not same_count,
+                "components": alternate["count"], "bound_hits": alternate["bound_hits"],
                 "condition_number": alternate["condition_number"], "nrmse": alt_nrmse,
                 "residual_lag1": alt_lag, "snr": alt_snr, **alt_fractions})
             if not alt_valid:
                 reject("PREPROCESSING_VARIANT_QC_FAILED",
                        f"Контроль качества альтернативной обработки не пройден: {variant['label']}.")
-            if shift > fc["max_preprocessing_delta_pct"] or alternate["count"] != count:
+            if shift > fc["max_preprocessing_delta_pct"] or not same_count:
                 reject("PREPROCESSING_AREA_OR_COUNT_INSTABILITY",
                        f"Относительные площади/число компонентов чувствительны к обработке: {variant['label']}.")
     else:
@@ -598,12 +676,19 @@ def analyze_band(processed, config, seed=None, progress=None):
             "diagnostic_area_pct": float(relative[index]), "structure": categories[index],
             "center_ci_low": float(intervals[index, 0]) if boot["success_count"] >= 2 else np.nan,
             "center_ci_high": float(intervals[index, 1]) if boot["success_count"] >= 2 else np.nan,
+            "assignment_interval_low": float(assignment_intervals[index, 0]),
+            "assignment_interval_high": float(assignment_intervals[index, 1]),
+            "assignment_basis": "Primary bootstrap CI plus all admissible same-count sensitivity centers and boundary tolerance; not a confidence interval",
             "area_pct_sd": float(area_sd[index]), "accepted": quantitative_accepted})
     comparison = [{"components": model["count"],
         "initial_centers": ",".join(f"{c:g}" for c in model["initial_centers"]),
         "aicc": model["aicc"], "bic": model["bic"], "sse": model["sse"],
         "condition_number": model["condition_number"], "bound_hits": model["bound_hits"],
         "search_phase": model.get("search_phase", "candidate_subset"),
+        "baseline_offset": model.get("baseline_offset", 0.0),
+        "baseline_slope": model.get("baseline_slope", 0.0),
+        "baseline_parameter_count": model.get("baseline_parameter_count", 0),
+        "parameter_count": model.get("parameter_count", 3 * model["count"] + 1),
         "solver_starts": model.get("solver_starts", np.nan),
         "solver_total_nfev": model.get("solver_total_nfev", model.get("nfev", np.nan)),
         "admissible": admissible(model), "admissibility_reasons": model.get("admissibility_reasons", []),
@@ -614,6 +699,9 @@ def analyze_band(processed, config, seed=None, progress=None):
     return {"status": "Reliable fit" if quantitative_accepted else "Unreliable fit",
         "warnings": list(dict.fromkeys(warnings)), "components": components, "candidates": candidates,
         "model_comparison": comparison, "fit": best["fit"], "residuals": residual,
+        "baseline_adjustment": best.get("baseline_adjustment", np.zeros(len(x))),
+        "baseline_coefficients": best.get("baseline_coefficients", np.array([])),
+        "gaussian_fit": best.get("gaussian_fit", _model(x, best["params"])),
         "numerical_fit_reliable": numeric_reliable, "quantitative_accepted": quantitative_accepted,
         "fit_rejection_codes": rejection_codes, "protocol_blockers": protocol_blockers,
         "diagnostic_percentages": fractions, "bootstrap_diagnostics": boot.get("diagnostics", []),
@@ -621,6 +709,12 @@ def analyze_band(processed, config, seed=None, progress=None):
             "residual_lag1": lag1, "durbin_watson": dw, "sse": best["sse"],
             "aicc": best["aicc"], "bic": best["bic"], "delta_criterion_next_count": delta,
             "condition_number": best["condition_number"], "bound_hits": best["bound_hits"],
+            "baseline_offset": best.get("baseline_offset", 0.0),
+            "baseline_slope": best.get("baseline_slope", 0.0),
+            "baseline_basis_center_cm1": best.get("baseline_basis_center_cm1", float(np.mean(x))),
+            "baseline_basis_halfspan_cm1": best.get("baseline_basis_halfspan_cm1", float(np.ptp(x) / 2)),
+            "baseline_parameter_count": best.get("baseline_parameter_count", 0),
+            "parameter_count": best.get("parameter_count", 3 * count + 1),
             "primary_model_admissible": primary_admissible,
             "numerical_fit_reliable": numeric_reliable, "quantitative_accepted": quantitative_accepted,
             "bootstrap_success_fraction": boot["success_fraction"], "bootstrap_count_support": boot["count_support"],
@@ -636,6 +730,6 @@ def analyze_band(processed, config, seed=None, progress=None):
             "bootstrap_success_count": boot["success_count"], "bootstrap_block_length": boot["block_length"],
             "max_area_pct_sd": float(np.nanmax(area_sd)) if np.isfinite(area_sd).any() else np.nan,
             "max_structure_pct_sd": float(np.nanmax(structure_sd)) if np.isfinite(structure_sd).any() else np.nan,
-            "bootstrap_structure_sd_basis": "Final CI-aware fixed categories; bootstrap component areas summed by final category"},
+            "bootstrap_structure_sd_basis": "Shared fixed categories from primary bootstrap CI and all admissible same-count sensitivity centers; bootstrap component areas summed by final category"},
         "percentages": fractions if quantitative_accepted else {name: np.nan for name in STRUCTURES},
         "sensitivity": sensitivity}

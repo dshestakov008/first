@@ -1,6 +1,7 @@
 """Known spectral areas and rejection checks, without invented biological data."""
 
 from copy import deepcopy
+import json
 import tempfile
 from pathlib import Path
 import unittest
@@ -136,6 +137,14 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(len(tables["Unreliable_Spectra"]), 2)
             self.assertTrue(tables["Secondary_Structure"][list(STRUCTURES)].isna().all().all())
             self.assertEqual(tables["Fit_Quality"]["status"].tolist(), ["Failed", "Unreliable fit"])
+            quality = tables["Fit_Quality"].iloc[1]
+            coefficients = json.loads(quality["baseline_coefficients"])
+            self.assertEqual(len(coefficients), 2)
+            processed = tables["Processed_Spectra"]
+            coordinate = ((processed["wavenumber"] - quality["baseline_basis_center_cm1"])
+                          / quality["baseline_basis_halfspan_cm1"])
+            np.testing.assert_allclose(processed["baseline_adjustment"],
+                                       coefficients[0] + coefficients[1] * coordinate)
             self.assertEqual(len(tables["Raw_Spectra"]), len(raw["x"]))
             self.assertTrue(tables["Metadata"]["sha256"].notna().all())
             self.assertFalse(np.isfinite(tables["Statistical_Tests"]["p_value"]).any())

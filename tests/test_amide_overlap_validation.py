@@ -92,6 +92,28 @@ class OverlapTruthTests(unittest.TestCase):
         self.assertGreaterEqual(fit["metrics"]["bootstrap_success_fraction"],
                                 self.config["fitting"]["bootstrap_success_fraction"])
 
+    def test_non_negligible_gaussian_tails_do_not_bias_widths_or_areas(self):
+        # Both cases have broad Gaussian signal in the regions used to estimate
+        # the preliminary linear baseline. Treating those endpoints as if all
+        # their absorbance were baseline changes the signal to be fitted. The
+        # fit must account for that nuisance line while retaining Gaussian tails.
+        for name in ("wide_single_edge_tail", "wide_two_edge_tails"):
+            with self.subTest(case=name):
+                case = self.cases[name]
+                fit, truth, _ = self.results[name]
+                self.assertEqual(fit["status"], "Reliable fit", fit["warnings"])
+                self.assertEqual(len(fit["components"]), len(case["parameters"]))
+                np.testing.assert_allclose(
+                    [row["center"] for row in fit["components"]],
+                    [row[1] for row in case["parameters"]], atol=0.5, rtol=0)
+                np.testing.assert_allclose(
+                    [row["fwhm"] for row in fit["components"]],
+                    [row[2] for row in case["parameters"]], atol=0.6, rtol=0)
+                np.testing.assert_allclose(
+                    [row["area_pct"] for row in fit["components"]], truth,
+                    atol=2.0, rtol=0)
+                self.assertTrue(summarize(case, fit, truth)["validation_passed"])
+
     def test_assignment_boundary_does_not_force_a_structural_category(self):
         fit, _, _ = self.results["assignment_boundary"]
         if fit["status"] == "Reliable fit":

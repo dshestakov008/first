@@ -50,9 +50,11 @@ class ConfigurationTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     load_config(path)
 
-    def test_saved_defaults_match_python_defaults(self):
+    def test_project_config_differs_only_by_confirmed_instrument_resolution(self):
         path = Path(__file__).resolve().parents[1] / "analysis_config.json"
-        self.assertEqual(load_config(path), default_config())
+        expected = default_config()
+        expected["resolution_confirmed"] = True
+        self.assertEqual(load_config(path), expected)
 
     def test_custom_labels_sizes_and_block_length(self):
         config = load_config({"plots": {"group_labels": {"Control": "Контроль"},

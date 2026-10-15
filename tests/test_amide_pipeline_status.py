@@ -19,7 +19,7 @@ from amide_analysis.reports import MAIN_SHEETS
 
 class PipelineStatusTests(unittest.TestCase):
     def _run(self, directory, *, confirmed=False, numerical=True, failed_variant=False,
-             invalid_source=False):
+             invalid_source=False, joint_baseline=False):
         input_dir = Path(directory) / "spectra"
         for group in ("Control", "Cancer"):
             group_dir = input_dir / group
@@ -33,11 +33,13 @@ class PipelineStatusTests(unittest.TestCase):
             source.to_csv(group_dir / "mouse.csv", index=False)
         config = default_config()
         config["resolution_confirmed"] = confirmed
+        if joint_baseline:
+            config["normalization"] = "area"
         fractions = dict(zip(STRUCTURES, [10.0, 60.0, 20.0, 5.0, 5.0]))
 
         def fitted(processed, config, seed=None, **kwargs):
             accepted = bool(numerical and confirmed)
-            return {
+            result = {
                 "status": "Reliable fit" if accepted else "Unreliable fit",
                 "warnings": [] if numerical else ["Bootstrap areas are not stable"],
                 "fit": processed["corrected"].copy(),
@@ -58,6 +60,10 @@ class PipelineStatusTests(unittest.TestCase):
                      "reason": "area instability"},
                 ],
             }
+            if joint_baseline:
+                result["baseline_adjustment"] = np.linspace(.003, .008, len(processed["x"]))
+                result["baseline_coefficients"] = [.0055, .0025]
+            return result
 
         messages = []
         patches = [patch("amide_analysis.pipeline.analyze_band", side_effect=fitted),
@@ -164,6 +170,31 @@ class PipelineStatusTests(unittest.TestCase):
             self.assertIn("Traceback", errors[0].read_text(encoding="utf-8"))
             self.assertTrue(result["excel"].is_file())
             self.assertIn("Прочитано спектров: 1/2", "\n".join(messages))
+
+    def test_joint_baseline_exports_reconstruct_original_signal_in_correct_units(self):
+        with tempfile.TemporaryDirectory() as directory:
+            result, _, _ = self._run(directory, confirmed=True, joint_baseline=True)
+            quality = result["tables"]["Fit_Quality"].set_index("spectrum_id")
+            self.assertEqual(json.loads(quality["baseline_coefficients"].iloc[0]), [.0055, .0025])
+            processed = result["tables"]["Processed_Spectra"]
+            for spectrum_id, frame in processed.groupby("spectrum_id"):
+                factor = quality.at[spectrum_id, "normalization_factor"]
+                self.assertNotEqual(factor, 1.)
+                self.assertTrue(frame["baseline_adjustment"].gt(0).all())
+                np.testing.assert_allclose(frame["refined_baseline"],
+                    frame["baseline"] + frame["baseline_adjustment"] * factor)
+                np.testing.assert_allclose(frame["corrected_refined"],
+                    frame["corrected"] - frame["baseline_adjustment"])
+                np.testing.assert_allclose(frame["gaussian_fit"],
+                    frame["fit"] - frame["baseline_adjustment"])
+                np.testing.assert_allclose(frame["raw"], frame["refined_baseline"]
+                    + factor * (frame["gaussian_fit"] + frame["residual"]))
+            csv = pd.read_csv(result["output_dir"] / "Processed_Spectra.csv")
+            for column in ("baseline_adjustment", "refined_baseline", "corrected_refined", "gaussian_fit"):
+                np.testing.assert_allclose(csv[column], processed[column])
+            settings = result["tables"]["Processing_Settings"].set_index("key")
+            self.assertIn("two baseline coefficients", settings.at["fit_model", "value"])
+            self.assertIn("normalization_factor", settings.at["processed_spectra_units", "value"])
 
 
 if __name__ == "__main__":

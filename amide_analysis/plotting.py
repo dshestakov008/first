@@ -148,20 +148,37 @@ def plot_spectrum(raw: dict, processed: dict | None, fit: dict | None,
         baseline = _array(processed.get("baseline", []))
         corrected = _array(processed.get("corrected", []))
         smoothed = _array(processed.get("smoothed", []))
+        adjustment = _array(fit.get("baseline_adjustment", [])) if fit is not None else np.array([])
+        refined = (len(adjustment) == len(x) and np.all(np.isfinite(adjustment))
+                   and bool(fit.get("components", []))) if fit is not None else False
+        if not refined:
+            adjustment = np.zeros_like(x)
+        factor = float(processed.get("normalization_factor", 1))
+        corrected_refined = corrected - adjustment if len(corrected) == len(x) else corrected
         if len(original) == len(x):
             axes[0].plot(x, original, label="Amide I before correction", color="#253746")
         if len(baseline) == len(x):
-            axes[0].plot(x, baseline, "--", label="Estimated baseline", color="#d97732")
+            axes[0].plot(x, baseline, "--", label="Initial estimated baseline" if refined else "Estimated baseline",
+                         color="#d97732")
+            if refined:
+                axes[0].plot(x, baseline + adjustment * factor, ":",
+                             label="Jointly refined linear baseline", color="#8655a1")
         if len(corrected) == len(x):
-            axes[1].plot(x, corrected, label="Corrected signal (fit input)", color="#253746")
+            axes[1].plot(x, corrected,
+                         label="After initial baseline (fit input)" if refined else "Corrected signal (fit input)",
+                         color="#253746", alpha=.6 if refined else 1)
+            if refined:
+                axes[1].plot(x, corrected_refined, label="After jointly refined baseline", color="#8655a1")
         if len(smoothed) == len(x):
-            axes[1].plot(x, smoothed, label="SG-smoothed (visualisation)", color="#008577", alpha=.8)
+            axes[1].plot(x, smoothed - adjustment,
+                         label="SG-smoothed after refined baseline (visualisation)" if refined else "SG-smoothed (visualisation)",
+                         color="#008577", alpha=.8)
         for axis in axes:
             _reverse_axis(axis, x)
-            axis.set_ylabel("Absorbance" if processed.get("normalization_factor", 1) == 1
-                            else "Normalised signal (a.u.)")
             if axis.lines:
                 axis.legend(frameon=False, fontsize="small")
+        axes[0].set_ylabel("Absorbance")
+        axes[1].set_ylabel("Absorbance" if factor == 1 else "Normalised signal (a.u.)")
         axes[0].set_title(f"{stem} — baseline correction")
         files += _save(fig, output_dir, f"{stem}_baseline", config)
 
@@ -200,8 +217,9 @@ def plot_spectrum(raw: dict, processed: dict | None, fit: dict | None,
         if fit is not None:
             fig, axes = plt.subplots(2, 1, figsize=(size[0], size[1] * 1.4),
                                      sharex=True, gridspec_kw={"height_ratios": [3, 1]})
-            if len(corrected) == len(x):
-                axes[0].plot(x, corrected, color="black", linewidth=1, label="Corrected signal")
+            if len(corrected_refined) == len(x):
+                axes[0].plot(x, corrected_refined, color="black", linewidth=1,
+                             label="Signal after jointly refined baseline" if refined else "Corrected signal")
             reliable = fit.get("status") == "Reliable fit"
             curves = []
             for number, component in enumerate(fit.get("components", []), start=1):
@@ -226,11 +244,13 @@ def plot_spectrum(raw: dict, processed: dict | None, fit: dict | None,
             total = _array(fit.get("fit", []))
             if len(total) != len(x) or not np.all(np.isfinite(total)):
                 total = np.sum(curves, axis=0) if curves else np.array([])
+            elif refined:
+                total = total - adjustment
             if len(total) == len(x):
                 axes[0].plot(x, total, "--", color="#d83b3b", linewidth=1.6, label="Gaussian sum")
                 residuals = _array(fit.get("residuals", []))
-                if len(residuals) != len(x) and len(corrected) == len(x):
-                    residuals = corrected - total
+                if len(residuals) != len(x) and len(corrected_refined) == len(x):
+                    residuals = corrected_refined - total
                 if len(residuals) == len(x):
                     axes[1].plot(x, residuals, color="#253746", linewidth=1)
             else:
@@ -238,13 +258,14 @@ def plot_spectrum(raw: dict, processed: dict | None, fit: dict | None,
                 _note(axes[1], "Residuals unavailable")
             axes[1].axhline(0, color="gray", linewidth=.7)
             axes[1].set_ylabel("Residual")
-            axes[0].set_ylabel("Corrected signal (a.u.)")
+            axes[0].set_ylabel("Signal after refined baseline (a.u.)" if refined else "Corrected signal (a.u.)")
             for axis in axes:
                 _reverse_axis(axis, x)
             if axes[0].lines:
                 axes[0].legend(frameon=False, fontsize="small", loc="best")
             label = "Reliable fit" if reliable else "Unreliable fit — diagnostic parameters only"
-            axes[0].set_title(f"{stem} — {label}")
+            baseline_caption = "\nComponents and signal relative to jointly refined baseline" if refined else ""
+            axes[0].set_title(f"{stem} — {label}{baseline_caption}")
             warning_text = _warning_text(fit)
             if warning_text:
                 fig.text(.5, .01, warning_text, ha="center", fontsize="small", wrap=True)

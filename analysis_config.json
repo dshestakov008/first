@@ -5,7 +5,7 @@
     1700.0
   ],
   "spectral_resolution_cm1": 4.0,
-  "resolution_confirmed": false,
+  "resolution_confirmed": true,
   "irregular_step_tolerance": 0.05,
   "baseline": {
     "method": "linear",
